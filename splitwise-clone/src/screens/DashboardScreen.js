@@ -35,12 +35,19 @@ function DashboardScreen({ navigation }) {
 
   return (
     <View style={styles.container}>
-      <Button
-        title="Add New Expense"
-        onPress={() => navigation.navigate('AddExpense')}
-      />
+      <View style={styles.buttonContainer}>
+        <Button
+          title="Add New Expense"
+          onPress={() => navigation.navigate('AddExpense')}
+        />
+        <View style={styles.buttonSpacer} />
+        <Button
+          title="View My Groups"
+          onPress={() => navigation.navigate('GroupsList')}
+        />
+      </View>
       {expenses.length === 0 ? (
-        <Text style={styles.noExpensesText}>No expenses yet. Add one!</Text>
+        <Text style={styles.noExpensesText}>No personal expenses yet. Add one or check your groups!</Text>
       ) : (
         <FlatList
           data={expenses}
@@ -59,8 +66,16 @@ const styles = StyleSheet.create({
     padding: 10,
     backgroundColor: '#fff',
   },
+  buttonContainer: {
+    flexDirection: 'row',
+    justifyContent: 'space-around',
+    marginBottom: 15,
+  },
+  buttonSpacer: {
+    width: 10, // Adds space between buttons
+  },
   list: {
-    marginTop: 20,
+    marginTop: 10, // Adjusted margin
   },
   expenseItem: {
     flexDirection: 'row',
