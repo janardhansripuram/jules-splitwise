@@ -7,7 +7,10 @@ import SignUpScreen from '../screens/SignUpScreen';
 import AuthLoadingScreen from '../screens/AuthLoadingScreen';
 import CreateGroupScreen from '../screens/CreateGroupScreen';
 import GroupsListScreen from '../screens/GroupsListScreen';
-import GroupDetailScreen from '../screens/GroupDetailScreen'; // Import GroupDetailScreen
+import GroupDetailScreen from '../screens/GroupDetailScreen';
+import InviteMembersScreen from '../screens/InviteMembersScreen';
+import PendingInvitationsScreen from '../screens/PendingInvitationsScreen';
+import RecordPaymentScreen from '../screens/RecordPaymentScreen'; // Import RecordPaymentScreen
 
 const Stack = createStackNavigator();
 
@@ -39,6 +42,21 @@ function AppStack() {
         name="GroupDetail"
         component={GroupDetailScreen}
         // Title for this screen is set dynamically in GroupDetailScreen.js
+      />
+      <Stack.Screen
+        name="InviteMembers"
+        component={InviteMembersScreen}
+        options={{ title: 'Invite Members' }}
+      />
+      <Stack.Screen
+        name="PendingInvitations"
+        component={PendingInvitationsScreen}
+        options={{ title: 'Pending Invitations' }}
+      />
+      <Stack.Screen
+        name="RecordPayment"
+        component={RecordPaymentScreen}
+        options={{ title: 'Record Payment' }}
       />
       {/* Add other app screens here */}
     </Stack.Navigator>

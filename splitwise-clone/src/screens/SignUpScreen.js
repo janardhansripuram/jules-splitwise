@@ -18,12 +18,34 @@ function SignUpScreen({ navigation }) {
 
       if (user) {
         // Store additional user info in Firestore
-        await firebase.firestore().collection('users').doc(user.uid).set({
+        const userDocData = {
           name: name,
-          email: email,
+          email: email, // email is already normalized (lowercased) from handleSignUp
           createdAt: firebase.firestore.FieldValue.serverTimestamp(),
-        });
+        };
+        await firebase.firestore().collection('users').doc(user.uid).set(userDocData);
         console.log('User account created & user info saved!');
+
+        // Handle pending_signup invitations
+        const groupsRef = firebase.firestore().collection('groups');
+        const querySnapshot = await groupsRef.where('members', 'array-contains', { email: email, status: 'pending_signup' }).get();
+
+        if (!querySnapshot.empty) {
+          console.log(`Found ${querySnapshot.size} group(s) with pending_signup for ${email}`);
+          const batch = firebase.firestore().batch();
+          querySnapshot.forEach(groupDoc => {
+            const groupData = groupDoc.data();
+            const updatedMembers = groupData.members.map(member => {
+              if (member.email === email && member.status === 'pending_signup') {
+                return { ...member, uid: user.uid, status: 'pending' };
+              }
+              return member;
+            });
+            batch.update(groupDoc.ref, { members: updatedMembers });
+          });
+          await batch.commit();
+          console.log('Updated pending_signup invitations to pending for new user.');
+        }
         // Navigation to the main app will be handled by onAuthStateChanged listener
       }
     } catch (error) {

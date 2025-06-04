@@ -20,19 +20,29 @@ function CreateGroupScreen({ navigation }) {
       return;
     }
     const currentUserUid = currentUser.uid;
+    const currentUserEmail = currentUser.email; // Get current user's email
+
+    if (!currentUserEmail) {
+      Alert.alert("Authentication Error", "Could not retrieve user email. Please ensure your profile is complete or try logging in again.");
+      return;
+    }
 
     try {
       const groupData = {
         name: groupName,
         description: groupDescription,
         createdBy: currentUserUid,
-        members: [currentUserUid], // Current user is automatically a member
+        members: [{
+          uid: currentUserUid,
+          email: currentUserEmail, // Store email
+          status: 'accepted'
+        }],
         createdAt: firebase.firestore.FieldValue.serverTimestamp(),
       };
 
       await firebase.firestore().collection('groups').add(groupData);
 
-      console.log('Group created successfully!');
+      console.log('Group created successfully with new member structure!');
       Alert.alert("Group Created", `Group "${groupName}" was successfully created.`);
       setGroupName('');
       setGroupDescription('');

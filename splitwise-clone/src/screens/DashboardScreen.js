@@ -45,9 +45,15 @@ function DashboardScreen({ navigation }) {
           title="View My Groups"
           onPress={() => navigation.navigate('GroupsList')}
         />
+        <View style={styles.buttonSpacer} />
+        <Button
+          title="Pending Invites"
+          onPress={() => navigation.navigate('PendingInvitations')}
+          color="#ff8c00" // Example: Orange color for invites
+        />
       </View>
       {expenses.length === 0 ? (
-        <Text style={styles.noExpensesText}>No personal expenses yet. Add one or check your groups!</Text>
+        <Text style={styles.noExpensesText}>No personal expenses yet. Add one, check groups, or view invites!</Text>
       ) : (
         <FlatList
           data={expenses}
