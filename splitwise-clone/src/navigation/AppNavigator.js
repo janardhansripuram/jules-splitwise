@@ -13,7 +13,9 @@ import PendingInvitationsScreen from '../screens/PendingInvitationsScreen';
 import RecordPaymentScreen from '../screens/RecordPaymentScreen';
 import ItemizedExpenseDetailScreen from '../screens/ItemizedExpenseDetailScreen';
 import FriendsScreen from '../screens/FriendsScreen';
-import RecordFriendPaymentScreen from '../screens/RecordFriendPaymentScreen'; // Import RecordFriendPaymentScreen
+import RecordFriendPaymentScreen from '../screens/RecordFriendPaymentScreen';
+import RecurringExpensesListScreen from '../screens/RecurringExpensesListScreen'; // Import List Screen
+import AddEditRecurringExpenseScreen from '../screens/AddEditRecurringExpenseScreen'; // Import Add/Edit Screen
 
 const Stack = createStackNavigator();
 
@@ -75,6 +77,16 @@ function AppStack() {
         name="RecordFriendPayment"
         component={RecordFriendPaymentScreen}
         // Title is set dynamically in the screen component
+      />
+      <Stack.Screen
+        name="RecurringExpensesList"
+        component={RecurringExpensesListScreen}
+        options={{ title: 'Recurring Expenses' }}
+      />
+      <Stack.Screen
+        name="AddEditRecurringExpense"
+        component={AddEditRecurringExpenseScreen}
+        // Title can be set dynamically in the screen component (e.g., "Edit" or "New")
       />
       {/* Add other app screens here */}
     </Stack.Navigator>

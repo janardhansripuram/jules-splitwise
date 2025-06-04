@@ -182,6 +182,7 @@ function DashboardScreen({ navigation }) {
         <StyledButton title="My Groups" onPress={() => navigation.navigate('GroupsList')} type="primary" style={styles.gridButton} />
         <StyledButton title="Pending Invites" onPress={() => navigation.navigate('PendingInvitations')} type="primary" style={styles.gridButton} />
         <StyledButton title="Friends" onPress={() => navigation.navigate('Friends')} type="primary" style={styles.gridButton} />
+        <StyledButton title="Recurring" onPress={() => navigation.navigate('RecurringExpensesList')} type="primary" style={styles.gridButton} />
       </View>
 
       <Text style={styles.sectionTitle}>Recent Personal Expenses</Text>
