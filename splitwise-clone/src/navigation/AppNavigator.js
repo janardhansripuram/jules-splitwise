@@ -11,7 +11,9 @@ import GroupDetailScreen from '../screens/GroupDetailScreen';
 import InviteMembersScreen from '../screens/InviteMembersScreen';
 import PendingInvitationsScreen from '../screens/PendingInvitationsScreen';
 import RecordPaymentScreen from '../screens/RecordPaymentScreen';
-import ItemizedExpenseDetailScreen from '../screens/ItemizedExpenseDetailScreen'; // Import ItemizedExpenseDetailScreen
+import ItemizedExpenseDetailScreen from '../screens/ItemizedExpenseDetailScreen';
+import FriendsScreen from '../screens/FriendsScreen';
+import RecordFriendPaymentScreen from '../screens/RecordFriendPaymentScreen'; // Import RecordFriendPaymentScreen
 
 const Stack = createStackNavigator();
 
@@ -62,6 +64,16 @@ function AppStack() {
       <Stack.Screen
         name="ItemizedExpenseDetail"
         component={ItemizedExpenseDetailScreen}
+        // Title is set dynamically in the screen component
+      />
+      <Stack.Screen
+        name="Friends"
+        component={FriendsScreen}
+        options={{ title: 'Friends & Social' }}
+      />
+      <Stack.Screen
+        name="RecordFriendPayment"
+        component={RecordFriendPaymentScreen}
         // Title is set dynamically in the screen component
       />
       {/* Add other app screens here */}
