@@ -1,87 +1,109 @@
 import React, { useState } from 'react';
-import { View, Text, TextInput, Button, StyleSheet, Alert, TouchableOpacity } from 'react-native';
+import { View, Text, StyleSheet, Alert, TouchableOpacity } from 'react-native';
 import { firebase } from '../../firebaseConfig';
+import StyledButton from '../components/StyledButton';
+import StyledTextInput from '../components/StyledTextInput';
+
+const COLORS = {
+  background: '#f8f9fa',
+  text: '#212529',
+  primary: '#007bff',
+  secondaryText: '#6c757d',
+};
 
 function SignUpScreen({ navigation }) {
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [loading, setLoading] = useState(false);
 
   const handleSignUp = async () => {
-    if (!name.trim() || !email.trim() || !password.trim()) {
+    const normalizedEmail = email.trim().toLowerCase();
+    if (!name.trim() || !normalizedEmail || !password.trim()) {
       Alert.alert("Input Error", "Please fill in all fields.");
       return;
     }
+    if (password.length < 6) {
+      Alert.alert("Password Too Short", "Password must be at least 6 characters long.");
+      return;
+    }
+    setLoading(true);
     try {
-      const userCredential = await firebase.auth().createUserWithEmailAndPassword(email, password);
+      const userCredential = await firebase.auth().createUserWithEmailAndPassword(normalizedEmail, password);
       const user = userCredential.user;
 
       if (user) {
-        // Store additional user info in Firestore
         const userDocData = {
-          name: name,
-          email: email, // email is already normalized (lowercased) from handleSignUp
+          name: name.trim(),
+          email: normalizedEmail,
           createdAt: firebase.firestore.FieldValue.serverTimestamp(),
         };
         await firebase.firestore().collection('users').doc(user.uid).set(userDocData);
-        console.log('User account created & user info saved!');
 
-        // Handle pending_signup invitations
         const groupsRef = firebase.firestore().collection('groups');
-        const querySnapshot = await groupsRef.where('members', 'array-contains', { email: email, status: 'pending_signup' }).get();
+        // Query for groups where this email was invited before they had an account
+        const querySnapshot = await groupsRef.where('members', 'array-contains', { email: normalizedEmail, status: 'pending_signup' }).get();
 
         if (!querySnapshot.empty) {
-          console.log(`Found ${querySnapshot.size} group(s) with pending_signup for ${email}`);
           const batch = firebase.firestore().batch();
           querySnapshot.forEach(groupDoc => {
             const groupData = groupDoc.data();
-            const updatedMembers = groupData.members.map(member => {
-              if (member.email === email && member.status === 'pending_signup') {
-                return { ...member, uid: user.uid, status: 'pending' };
-              }
-              return member;
-            });
+            const updatedMembers = groupData.members.map(member =>
+              (member.email === normalizedEmail && member.status === 'pending_signup')
+                ? { ...member, uid: user.uid, status: 'pending' }
+                : member
+            );
             batch.update(groupDoc.ref, { members: updatedMembers });
           });
           await batch.commit();
-          console.log('Updated pending_signup invitations to pending for new user.');
+          console.log(`Updated ${querySnapshot.size} pending_signup invitations for ${normalizedEmail}`);
         }
-        // Navigation to the main app will be handled by onAuthStateChanged listener
+        // Navigation to the main app will be handled by onAuthStateChanged listener in App.js
       }
     } catch (error) {
       Alert.alert("Sign Up Failed", error.message);
       console.error("Sign up error: ", error);
     }
+    setLoading(false);
   };
 
   return (
     <View style={styles.container}>
-      <Text style={styles.title}>Sign Up</Text>
-      <TextInput
-        style={styles.input}
+      <Text style={styles.title}>Create Account</Text>
+      <StyledTextInput
         placeholder="Full Name"
         value={name}
         onChangeText={setName}
         autoCapitalize="words"
+        textContentType="name"
+        disabled={loading}
       />
-      <TextInput
-        style={styles.input}
-        placeholder="Email"
+      <StyledTextInput
+        placeholder="Email Address"
         value={email}
         onChangeText={setEmail}
         keyboardType="email-address"
         autoCapitalize="none"
+        textContentType="emailAddress"
+        disabled={loading}
       />
-      <TextInput
-        style={styles.input}
+      <StyledTextInput
         placeholder="Password (min. 6 characters)"
         value={password}
         onChangeText={setPassword}
         secureTextEntry
+        textContentType="newPassword" // Helps with password generation suggestions
+        disabled={loading}
       />
-      <Button title="Sign Up" onPress={handleSignUp} />
-      <TouchableOpacity onPress={() => navigation.navigate('Login')}>
-        <Text style={styles.switchText}>Already have an account? Login</Text>
+      <StyledButton
+        title={loading ? "Creating Account..." : "Sign Up"}
+        onPress={handleSignUp}
+        type="primary"
+        disabled={loading}
+        style={{width: '100%', marginTop: 10}}
+      />
+      <TouchableOpacity onPress={() => navigation.navigate('Login')} disabled={loading} style={styles.switchButton}>
+        <Text style={styles.switchText}>Already have an account? <Text style={styles.loginLink}>Login</Text></Text>
       </TouchableOpacity>
     </View>
   );
@@ -91,30 +113,28 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     justifyContent: 'center',
-    padding: 20,
-    backgroundColor: '#f5f5f5',
+    padding: 25,
+    backgroundColor: COLORS.background,
   },
   title: {
-    fontSize: 28,
+    fontSize: 32,
     fontWeight: 'bold',
+    color: COLORS.text,
     textAlign: 'center',
-    marginBottom: 30,
+    marginBottom: 35,
   },
-  input: {
-    backgroundColor: '#fff',
-    paddingHorizontal: 15,
-    paddingVertical: 12,
-    borderRadius: 8,
-    marginBottom: 15,
-    borderWidth: 1,
-    borderColor: '#ddd',
+  switchButton: {
+    marginTop: 25,
+    alignItems: 'center',
   },
   switchText: {
-    marginTop: 20,
-    color: 'blue',
-    textAlign: 'center',
     fontSize: 16,
+    color: COLORS.secondaryText,
   },
+  loginLink: {
+    color: COLORS.primary,
+    fontWeight: 'bold',
+  }
 });
 
 export default SignUpScreen;

@@ -1,47 +1,66 @@
 import React, { useState } from 'react';
-import { View, Text, TextInput, Button, StyleSheet, Alert, TouchableOpacity } from 'react-native';
+import { View, Text, StyleSheet, Alert, TouchableOpacity } from 'react-native';
 import { firebase } from '../../firebaseConfig';
+import StyledButton from '../components/StyledButton'; // Import StyledButton
+import StyledTextInput from '../components/StyledTextInput'; // Import StyledTextInput
+
+const COLORS = { // Defined for this screen, or import from a global styles file
+  background: '#f8f9fa',
+  text: '#212529',
+  primary: '#007bff',
+  secondaryText: '#6c757d',
+};
 
 function LoginScreen({ navigation }) {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [loading, setLoading] = useState(false);
 
   const handleLogin = async () => {
     if (!email.trim() || !password.trim()) {
       Alert.alert("Input Error", "Please enter both email and password.");
       return;
     }
+    setLoading(true);
     try {
-      await firebase.auth().signInWithEmailAndPassword(email, password);
-      // Navigation to the main app will be handled by onAuthStateChanged listener
-      console.log('User logged in successfully!');
+      await firebase.auth().signInWithEmailAndPassword(email.trim(), password);
+      // Navigation is handled by onAuthStateChanged
     } catch (error) {
       Alert.alert("Login Failed", error.message);
       console.error("Login error: ", error);
     }
+    setLoading(false);
   };
 
   return (
     <View style={styles.container}>
-      <Text style={styles.title}>Login</Text>
-      <TextInput
-        style={styles.input}
-        placeholder="Email"
+      <Text style={styles.title}>Welcome Back!</Text>
+      <StyledTextInput
+        placeholder="Email Address"
         value={email}
         onChangeText={setEmail}
         keyboardType="email-address"
         autoCapitalize="none"
+        textContentType="emailAddress" // Helps with autofill
+        disabled={loading}
       />
-      <TextInput
-        style={styles.input}
+      <StyledTextInput
         placeholder="Password"
         value={password}
         onChangeText={setPassword}
         secureTextEntry
+        textContentType="password" // Helps with autofill
+        disabled={loading}
       />
-      <Button title="Login" onPress={handleLogin} />
-      <TouchableOpacity onPress={() => navigation.navigate('SignUp')}>
-        <Text style={styles.switchText}>Don't have an account? Sign Up</Text>
+      <StyledButton
+        title={loading ? "Logging in..." : "Login"}
+        onPress={handleLogin}
+        type="primary"
+        disabled={loading}
+        style={{width: '100%', marginTop: 10}} // Make button full width
+      />
+      <TouchableOpacity onPress={() => navigation.navigate('SignUp')} disabled={loading} style={styles.switchButton}>
+        <Text style={styles.switchText}>Don't have an account? <Text style={styles.signUpLink}>Sign Up</Text></Text>
       </TouchableOpacity>
     </View>
   );
@@ -51,30 +70,28 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     justifyContent: 'center',
-    padding: 20,
-    backgroundColor: '#f5f5f5',
+    padding: 25, // Increased padding
+    backgroundColor: COLORS.background,
   },
   title: {
-    fontSize: 28,
+    fontSize: 32, // Larger title
     fontWeight: 'bold',
+    color: COLORS.text,
     textAlign: 'center',
-    marginBottom: 30,
+    marginBottom: 35, // More space after title
   },
-  input: {
-    backgroundColor: '#fff',
-    paddingHorizontal: 15,
-    paddingVertical: 12,
-    borderRadius: 8,
-    marginBottom: 15,
-    borderWidth: 1,
-    borderColor: '#ddd',
+  switchButton: {
+    marginTop: 25, // More space before switch text
+    alignItems: 'center',
   },
   switchText: {
-    marginTop: 20,
-    color: 'blue',
-    textAlign: 'center',
     fontSize: 16,
+    color: COLORS.secondaryText,
   },
+  signUpLink: {
+    color: COLORS.primary,
+    fontWeight: 'bold',
+  }
 });
 
 export default LoginScreen;

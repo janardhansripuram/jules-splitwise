@@ -10,7 +10,8 @@ import GroupsListScreen from '../screens/GroupsListScreen';
 import GroupDetailScreen from '../screens/GroupDetailScreen';
 import InviteMembersScreen from '../screens/InviteMembersScreen';
 import PendingInvitationsScreen from '../screens/PendingInvitationsScreen';
-import RecordPaymentScreen from '../screens/RecordPaymentScreen'; // Import RecordPaymentScreen
+import RecordPaymentScreen from '../screens/RecordPaymentScreen';
+import ItemizedExpenseDetailScreen from '../screens/ItemizedExpenseDetailScreen'; // Import ItemizedExpenseDetailScreen
 
 const Stack = createStackNavigator();
 
@@ -57,6 +58,11 @@ function AppStack() {
         name="RecordPayment"
         component={RecordPaymentScreen}
         options={{ title: 'Record Payment' }}
+      />
+      <Stack.Screen
+        name="ItemizedExpenseDetail"
+        component={ItemizedExpenseDetailScreen}
+        // Title is set dynamically in the screen component
       />
       {/* Add other app screens here */}
     </Stack.Navigator>
