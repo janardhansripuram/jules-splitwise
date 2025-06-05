@@ -1,23 +1,16 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { View, Text, FlatList, StyleSheet, ActivityIndicator, Alert, TouchableOpacity, RefreshControl } from 'react-native';
+import { View, Text, FlatList, StyleSheet, ActivityIndicator, Alert, TouchableOpacity, RefreshControl, Modal } from 'react-native'; // Added Modal
 import { firebase } from '../../firebaseConfig';
 import { fetchUsernames } from '../utils/userUtils';
 import StyledButton from '../components/StyledButton';
-import { calculateNetBalance, calculateUserShareInExpense } from '../utils/balanceUtils';
-import { MaterialCommunityIcons } from '@expo/vector-icons'; // Import icon component
+import { calculateNetBalance, calculateUserShareInExpense, calculateAllMemberBalances } from '../utils/balanceUtils'; // Import all balance utils
+import { simplifyDebts } from '../utils/debtUtils'; // Import debt utils
+import { MaterialCommunityIcons } from '@expo/vector-icons';
 
-const COLORS = {
-  background: '#f8f9fa',
-  cardBackground: '#ffffff',
-  text: '#212529',
-  textSecondary: '#6c757d',
-  primary: '#007bff',
-  accentPositive: '#28a745',
-  accentNegative: '#dc3545',
-  border: '#dee2e6',
-  subtleBorder: '#e9ecef',
-  expenseItemBg: '#ffffff',
-  settlementItemBg: '#e6f7ff',
+const COLORS = { /* ... (palette as before) ... */
+  background: '#f8f9fa', cardBackground: '#ffffff', text: '#212529', textSecondary: '#6c757d',
+  primary: '#007bff', accentPositive: '#28a745', accentNegative: '#dc3545',
+  border: '#dee2e6', subtleBorder: '#e9ecef', expenseItemBg: '#ffffff', settlementItemBg: '#e6f7ff',
 };
 
 function GroupDetailScreen({ route, navigation }) {
@@ -25,12 +18,19 @@ function GroupDetailScreen({ route, navigation }) {
 
   const [groupExpenses, setGroupExpenses] = useState([]);
   const [groupSettlements, setGroupSettlements] = useState([]);
-  const [groupDetails, setGroupDetails] = useState(null);
-  const [usernamesMap, setUsernamesMap] = useState({});
+  const [groupDetails, setGroupDetails] = useState(null); // Contains { ..., members: [{uid, email, name (added by fetchData)}]}
+  const [usernamesMap, setUsernamesMap] = useState({}); // Still useful for quick lookups outside groupDetails context
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const [balances, setBalances] = useState({ netBalance: 0, settled: true });
+  const [currentUserNetBalance, setCurrentUserNetBalance] = useState({ netBalance: 0, settled: true }); // For current user's summary
+  const [groupMemberBalances, setGroupMemberBalances] = useState({}); // { uid: balance } For all members
   const [currentUserUid, setCurrentUserUid] = useState(null);
+
+  // Simplify Debts Modal State
+  const [isSimplifyModalVisible, setIsSimplifyModalVisible] = useState(false);
+  const [simplifiedTransactionsList, setSimplifiedTransactionsList] = useState([]);
+  const [isCalculatingSimplifiedDebts, setIsCalculatingSimplifiedDebts] = useState(false);
+
 
   useEffect(() => {
     const user = firebase.auth().currentUser;
@@ -46,17 +46,23 @@ function GroupDetailScreen({ route, navigation }) {
   const fetchData = useCallback(async () => {
     if (!currentUserUid || !groupId) return;
     setRefreshing(true);
+    setLoading(true); // Ensure loading is true at start of fetch
 
     const uidsToFetch = new Set();
     try {
       const groupDoc = await firebase.firestore().collection('groups').doc(groupId).get();
       if (!groupDoc.exists) {
-        Alert.alert("Error", "Group not found.");
-        navigation.goBack(); return;
+        Alert.alert("Error", "Group not found."); navigation.goBack(); return;
       }
-      const currentGroupDetails = groupDoc.data();
-      setGroupDetails(currentGroupDetails);
-      currentGroupDetails.members?.forEach(member => uidsToFetch.add(member.uid));
+      const currentGroupData = groupDoc.data();
+      // Fetch usernames for members first
+      const memberUids = currentGroupData.members?.map(m => m.uid) || [];
+      memberUids.forEach(uid => uidsToFetch.add(uid));
+
+      const namesMapForGroupMembers = memberUids.length > 0 ? await fetchUsernames(memberUids) : {};
+      const populatedMembers = currentGroupData.members.map(m => ({...m, name: namesMapForGroupMembers[m.uid] || m.email}));
+      setGroupDetails({...currentGroupData, members: populatedMembers});
+
 
       const expensesSnapshot = await firebase.firestore().collection('expenses').where('groupId', '==', groupId).orderBy('createdAt', 'desc').get();
       const expensesArray = expensesSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
@@ -74,7 +80,7 @@ function GroupDetailScreen({ route, navigation }) {
 
       if (uidsToFetch.size > 0) {
         const namesMap = await fetchUsernames(Array.from(uidsToFetch));
-        setUsernamesMap(namesMap);
+        setUsernamesMap(prev => ({...prev, ...namesMap})); // Merge with any existing from group members
       }
     } catch (error) {
       console.error("Error fetching group data: ", error);
@@ -91,14 +97,48 @@ function GroupDetailScreen({ route, navigation }) {
     }
   }, [currentUserUid, groupId, fetchData]);
 
+  // Recalculate balances whenever relevant data changes
   useEffect(() => {
-    if (!currentUserUid || loading || refreshing) return;
+    if (!currentUserUid || loading || refreshing || !groupDetails?.members) return;
 
-    const netBalanceForGroup = calculateNetBalance(groupExpenses, groupSettlements, currentUserUid);
-    setBalances({ netBalance: netBalanceForGroup, settled: Math.abs(netBalanceForGroup) < 0.01 });
-  }, [groupExpenses, groupSettlements, currentUserUid, loading, refreshing]);
+    const acceptedMemberUids = groupDetails.members.filter(m => m.status === 'accepted').map(m => m.uid);
+    if (acceptedMemberUids.length === 0) {
+        setCurrentUserNetBalance({ netBalance: 0, settled: true });
+        setGroupMemberBalances({});
+        return;
+    }
 
-  const renderExpenseItem = ({ item }) => {
+    const allBalances = calculateAllMemberBalances(groupExpenses, groupSettlements, acceptedMemberUids);
+    setGroupMemberBalances(allBalances);
+
+    const currentUserBalance = allBalances[currentUserUid] || 0;
+    setCurrentUserNetBalance({ netBalance: currentUserBalance, settled: Math.abs(currentUserBalance) < 0.01 });
+
+  }, [groupExpenses, groupSettlements, groupDetails, currentUserUid, loading, refreshing]);
+
+
+  const handleSimplifyDebts = () => {
+    if (!groupDetails || !groupDetails.members || Object.keys(groupMemberBalances).length === 0) {
+      Alert.alert("No Balances", "No member balances calculated yet to simplify.");
+      return;
+    }
+    setIsCalculatingSimplifiedDebts(true);
+    // Filter balances for accepted members only, as simplifyDebts doesn't know member status
+    const balancesToSimplify = {};
+    groupDetails.members.forEach(member => {
+        if(member.status === 'accepted' && groupMemberBalances[member.uid] !== undefined) {
+            balancesToSimplify[member.uid] = groupMemberBalances[member.uid];
+        }
+    });
+
+    const transactions = simplifyDebts(balancesToSimplify);
+    setSimplifiedTransactionsList(transactions);
+    setIsCalculatingSimplifiedDebts(false);
+    setIsSimplifyModalVisible(true);
+  };
+
+
+  const renderExpenseItem = ({ item }) => { /* ... (no change from previous) ... */
     if (!currentUserUid) return null;
     let splitDetail = '';
     const myShareInExpense = calculateUserShareInExpense(item, currentUserUid);
@@ -130,8 +170,7 @@ function GroupDetailScreen({ route, navigation }) {
       </TouchableOpacity>
     );
   };
-
-  const renderSettlementItem = ({ item }) => { /* ... (same as provided in failed diff) ... */
+  const renderSettlementItem = ({ item }) => { /* ... (no change from previous) ... */
     const payerName = usernamesMap[item.payerUid] || `User ${item.payerUid?.substring(0,6)}...`;
     const receiverName = usernamesMap[item.receiverUid] || `User ${item.receiverUid?.substring(0,6)}...`;
     return (
@@ -146,37 +185,33 @@ function GroupDetailScreen({ route, navigation }) {
       <Text style={styles.itemDate}>{item.createdAt?.toDate().toLocaleDateString()}</Text>
     </View>
   )};
-
-  const renderBalanceSummary = () => { /* ... (same as provided in failed diff) ... */
+  const renderBalanceSummary = () => { /* ... (no change from previous, uses currentUserNetBalance now) ... */
     let balanceText = "Calculating balance...";
     let balanceStyle = styles.balanceCalculatingText;
 
-    if (!loading && !refreshing) {
-        if (balances.settled) {
+    if (!loading && !refreshing) { // Use currentUserNetBalance
+        if (currentUserNetBalance.settled) {
             balanceText = "You are settled up in this group!";
             balanceStyle = styles.settledText;
-        } else if (balances.netBalance > 0) {
-            balanceText = `Overall, you are owed: $${balances.netBalance.toFixed(2)}`;
+        } else if (currentUserNetBalance.netBalance > 0) {
+            balanceText = `Overall, you are owed: $${currentUserNetBalance.netBalance.toFixed(2)}`;
             balanceStyle = styles.owedToMeText;
         } else {
-            balanceText = `Overall, you owe: $${Math.abs(balances.netBalance).toFixed(2)}`;
+            balanceText = `Overall, you owe: $${Math.abs(currentUserNetBalance.netBalance).toFixed(2)}`;
             balanceStyle = styles.youOweText;
         }
     }
     return <Text style={[styles.balanceSummaryText, balanceStyle]}>{balanceText}</Text>;
   };
 
-  if (loading && !refreshing) {
+  if (loading && !refreshing && !groupDetails) { // Adjusted initial loading condition
     return <View style={styles.centered}><ActivityIndicator size="large" color={COLORS.primary} /><Text>Loading group details...</Text></View>;
   }
 
   const combinedActivity = [...groupExpenses, ...groupSettlements]
     .sort((a, b) => (b.createdAt?.toDate?.() || 0) - (a.createdAt?.toDate?.() || 0));
-
-  const renderActivityItem = ({ item }) => {
-    if (item.type === 'settlement') {
-      return renderSettlementItem({ item });
-    }
+  const renderActivityItem = ({ item }) => { /* ... (no change from previous) ... */
+    if (item.type === 'settlement') { return renderSettlementItem({ item }); }
     return renderExpenseItem({ item });
   };
 
@@ -190,17 +225,24 @@ function GroupDetailScreen({ route, navigation }) {
               <StyledButton title="Invite Member" onPress={() => navigation.navigate('InviteMembers', { groupId: groupId })} type="secondary" style={styles.actionButton}/>
               <StyledButton title="Record Payment" onPress={() => navigation.navigate('RecordPayment', { groupId: groupId })} type="secondary" style={styles.actionButton}/>
             </View>
+            <StyledButton title="Simplify Group Debts" onPress={handleSimplifyDebts} type="outline" style={styles.simplifyButton} disabled={isCalculatingSimplifiedDebts || loading}/>
+
             <View style={styles.membersContainer}>
-              <Text style={styles.sectionTitle}>Accepted Members</Text>
-              {groupDetails && groupDetails.members && groupDetails.members.filter(m => m.status === 'accepted').length > 0 ? (
-                groupDetails.members.filter(m => m.status === 'accepted').map(member => (
-                  <Text key={member.uid} style={styles.memberEmail}>
-                    {usernamesMap[member.uid] || member.email} {member.uid === currentUserUid ? "(You)" : ""}
-                  </Text>
-                ))
-              ) : (
-                <Text style={styles.noItemsText}>No other accepted members.</Text>
-              )}
+              <Text style={styles.sectionTitle}>Accepted Members & Balances</Text>
+              {groupDetails?.members?.filter(m => m.status === 'accepted').map(member => {
+                const balance = groupMemberBalances[member.uid] || 0;
+                let balanceColor = balance === 0 ? COLORS.textSecondary : balance > 0 ? COLORS.accentPositive : COLORS.accentNegative;
+                return (
+                  <View key={member.uid} style={styles.memberBalanceItem}>
+                    <Text style={styles.memberEmail}>{usernamesMap[member.uid] || member.email} {member.uid === currentUserUid ? "(You)" : ""}</Text>
+                    <Text style={{...styles.memberBalanceText, color: balanceColor}}>
+                        {balance === 0 ? "Settled" : balance > 0 ? `Owed $${balance.toFixed(2)}` : `Owes $${Math.abs(balance).toFixed(2)}`}
+                    </Text>
+                  </View>
+                );
+              })}
+              {(!groupDetails?.members || groupDetails.members.filter(m => m.status === 'accepted').length === 0) &&
+                <Text style={styles.noItemsText}>No other accepted members.</Text>}
             </View>
             <Text style={styles.sectionTitle}>Group Activity</Text>
           </>
@@ -212,11 +254,40 @@ function GroupDetailScreen({ route, navigation }) {
         ListEmptyComponent={<Text style={styles.noItemsText}>{loading || refreshing ? 'Loading activity...' : 'No activity in this group yet.'}</Text>}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={fetchData} colors={[COLORS.primary]}/>}
       />
+
+      <Modal visible={isSimplifyModalVisible} onRequestClose={() => setIsSimplifyModalVisible(false)} animationType="slide" transparent={true}>
+        <View style={styles.modalContainer}>
+          <View style={styles.modalContent}>
+            <Text style={styles.modalTitle}>Simplified Debts</Text>
+            {isCalculatingSimplifiedDebts ? <ActivityIndicator/> :
+              simplifiedTransactionsList.length === 0 ?
+              <Text style={styles.noItemsText}>Everyone is settled up, or no simplification needed!</Text> :
+              <FlatList
+                data={simplifiedTransactionsList}
+                keyExtractor={(item, index) => `txn-${index}`}
+                renderItem={({item}) => (
+                  <View style={styles.transactionItem}>
+                    <Text style={styles.transactionText}>
+                      <Text style={styles.userName}>{usernamesMap[item.fromUid] || item.fromUid.substring(0,6)}</Text>
+                      {' should pay '}
+                      <Text style={styles.userName}>{usernamesMap[item.toUid] || item.toUid.substring(0,6)}</Text>
+                      <Text style={styles.transactionAmount}> ${item.amount.toFixed(2)}</Text>
+                    </Text>
+                  </View>
+                )}
+              />
+            }
+            <Text style={styles.disclaimerText}>These are suggested payments. Please record actual payments made using the 'Record Payment' feature.</Text>
+            <StyledButton title="Close" onPress={() => setIsSimplifyModalVisible(false)} type="primary" style={{marginTop:15}}/>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
+  // ... (Existing styles)
   container: { flex: 1, backgroundColor: COLORS.background },
   centered: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: COLORS.background },
   balanceContainer: { padding: 20, backgroundColor: COLORS.cardBackground, margin:15, borderRadius: 10, shadowColor: "#000", shadowOffset: { width: 0, height: 2, }, shadowOpacity: 0.05, shadowRadius: 3.84, elevation: 3, alignItems: 'center' },
@@ -225,16 +296,20 @@ const styles = StyleSheet.create({
   settledText: { color: COLORS.accentPositive },
   owedToMeText: { color: COLORS.accentPositive },
   youOweText: { color: COLORS.accentNegative },
-  actionButtonsContainer: { flexDirection: 'row', justifyContent: 'space-around', marginBottom: 20, paddingHorizontal:10 },
+  actionButtonsContainer: { flexDirection: 'row', justifyContent: 'space-around', marginBottom: 10, paddingHorizontal:10 },
   actionButton: { flex: 0.48 },
+  simplifyButton: { marginHorizontal:15, marginBottom:20, backgroundColor: COLORS.cardBackground, borderWidth:1, borderColor:COLORS.primary},
   membersContainer: { padding: 15, backgroundColor: COLORS.cardBackground, marginHorizontal:15, marginBottom:20, borderRadius: 10, shadowColor: "#000", shadowOffset: { width: 0, height: 1, }, shadowOpacity: 0.05, shadowRadius: 2, elevation: 2 },
   sectionTitle: { fontSize: 18, fontWeight: '600', color: COLORS.text, marginBottom: 12, paddingHorizontal: 20 },
-  memberEmail: { fontSize: 15, color: COLORS.textSecondary, paddingVertical: 5, borderBottomWidth:1, borderBottomColor: COLORS.subtleBorder },
+  memberEmail: { fontSize: 15, color: COLORS.textSecondary, paddingVertical: 5 }, // For member list without balance
+  memberBalanceItem: { flexDirection: 'row', justifyContent: 'space-between', alignItems:'center', paddingVertical: 8, borderBottomWidth:1, borderBottomColor: COLORS.subtleBorder},
+  memberBalanceText: { fontSize: 14, fontWeight:'500'},
+
   activityList: { paddingHorizontal: 15 },
   expenseItem: { backgroundColor: COLORS.expenseItemBg, padding: 15, marginBottom: 12, borderRadius: 8, borderWidth: 1, borderColor: COLORS.border },
   expenseHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems:'center', marginBottom: 8 },
   recurringIcon: { marginRight: 6 },
-  descriptionWithIcon: { flexShrink:1, maxWidth: '80%' }, // Adjust width if icon makes it too cramped
+  descriptionWithIcon: { flexShrink:1, maxWidth: '80%' },
   expenseDescription: { fontSize: 16, fontWeight: '500', color: COLORS.text, flexShrink:1 },
   expenseAmount: { fontSize: 16, fontWeight: 'bold', color: COLORS.primary },
   expensePaidBy: { fontSize: 14, color: COLORS.textSecondary, marginBottom: 4 },
@@ -245,8 +320,16 @@ const styles = StyleSheet.create({
   settlementText: { fontSize: 16, color: COLORS.text },
   userName: { fontWeight: 'bold', color: COLORS.primary },
   settlementAmount: { fontWeight: 'bold', color: COLORS.accentPositive },
-  settlementNote: { fontSize: 14, color: COLORS.textSecondary, marginTop: 5, fontStyle: 'italic' },
+  settlementNote: { fontSize: 14, color: COLORS.textSecondary, marginTop: 5, fontStyle:'italic' },
   noItemsText: { textAlign: 'center', marginVertical: 20, fontSize: 15, color: COLORS.textSecondary },
+  // Modal Styles for Simplify Debts
+  modalContainer: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: 'rgba(0,0,0,0.6)' },
+  modalContent: { backgroundColor: COLORS.cardBackground, padding: 25, borderRadius: 10, width: '90%', maxHeight: '85%', shadowColor: "#000", shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.25, shadowRadius: 3.84, elevation: 5 },
+  modalTitle: { fontSize: 20, fontWeight: 'bold', marginBottom: 20, textAlign: 'center', color: COLORS.text },
+  transactionItem: { paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: COLORS.subtleBorder },
+  transactionText: { fontSize: 16, color: COLORS.text },
+  transactionAmount: { fontWeight: 'bold', color: COLORS.primary },
+  disclaimerText: {fontSize: 13, color: COLORS.textSecondary, textAlign:'center', marginTop:15, fontStyle:'italic'},
 });
 
 export default GroupDetailScreen;

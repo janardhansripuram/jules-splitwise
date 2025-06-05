@@ -59,3 +59,57 @@ export const calculateNetBalance = (expenses, settlements, currentUserUid) => {
 
   return netBalance;
 };
+
+/**
+ * Calculates net balances for all members involved in a set of expenses and settlements.
+ * @param {Array<object>} expenses Array of expense objects.
+ * @param {Array<object>} settlements Array of settlement objects.
+ * @param {Array<string>} memberUids Array of UIDs of all members to calculate balances for.
+ * @returns {Object.<string, number>} An object mapping UIDs to their net balances.
+ */
+export const calculateAllMemberBalances = (expenses, settlements, memberUids) => {
+  if (!memberUids || memberUids.length === 0) return {};
+
+  const balances = {};
+  memberUids.forEach(uid => balances[uid] = 0); // Initialize balances
+
+  expenses.forEach(expense => {
+    const payerUid = expense.paidByUid;
+    const totalAmount = expense.amount;
+
+    // Temporary map for this expense's shares to avoid double counting if payer is also in memberOwes/involvedUids
+    const expenseShares = {};
+
+    memberUids.forEach(memberUid => {
+      expenseShares[memberUid] = calculateUserShareInExpense(expense, memberUid);
+    });
+
+    // Payer's contribution
+    if (balances[payerUid] !== undefined) { // Ensure payer is in the memberUids list
+        balances[payerUid] += totalAmount;
+    }
+
+    // Each member's share is subtracted from their balance
+    for (const memberUid in expenseShares) {
+        if (balances[memberUid] !== undefined) { // Ensure member is in the list
+            balances[memberUid] -= expenseShares[memberUid];
+        }
+    }
+  });
+
+  settlements.forEach(settlement => {
+    if (balances[settlement.payerUid] !== undefined) {
+      balances[settlement.payerUid] -= settlement.amount;
+    }
+    if (balances[settlement.receiverUid] !== undefined) {
+      balances[settlement.receiverUid] += settlement.amount;
+    }
+  });
+
+  // Round all balances to 2 decimal places to avoid floating point dust
+  for (const uid in balances) {
+      balances[uid] = parseFloat(balances[uid].toFixed(2));
+  }
+
+  return balances;
+};
