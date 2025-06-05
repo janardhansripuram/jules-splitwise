@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, FlatList, StyleSheet, Alert, RefreshControl } from 'react-native';
+import { View, Text, FlatList, StyleSheet, Alert, RefreshControl, ActivityIndicator } from 'react-native'; // Added ActivityIndicator
 import { firebase } from '../../firebaseConfig';
-import StyledButton from '../components/StyledButton'; // Import StyledButton
+import StyledButton from '../components/StyledButton';
+import { MaterialCommunityIcons } from '@expo/vector-icons'; // Import icon component
 
 const COLORS = {
   background: '#f8f9fa',
@@ -20,23 +21,77 @@ function DashboardScreen({ navigation }) {
   const [overallOwedToUser, setOverallOwedToUser] = useState(0);
   const [overallUserOwes, setOverallUserOwes] = useState(0);
   const [isLoadingBalances, setIsLoadingBalances] = useState(true);
+  const [isProcessingRecurringExpenses, setIsProcessingRecurringExpenses] = useState(false); // New state
   const [refreshing, setRefreshing] = useState(false);
-  const [currentUserUid, setCurrentUserUid] = useState(null); // Changed from currentUser object to just UID
+  const [currentUserUid, setCurrentUserUid] = useState(null);
+
+  // Import recurring expense manager
+  const { generateDueExpenses } = require('../utils/recurringExpenseManager');
 
   useEffect(() => {
     const user = firebase.auth().currentUser;
     if (user) {
       setCurrentUserUid(user.uid);
     } else {
-      // Handle user not logged in, e.g., navigate to Login
       navigation.navigate('Login');
     }
   }, [navigation]);
 
+  // useEffect for Recurring Expense Generation
+  useEffect(() => {
+    const runRecurringExpenseGeneration = async () => {
+      if (isProcessingRecurringExpenses || !currentUserUid) {
+        return;
+      }
+      console.log("Dashboard: Checking for recurring expenses to generate...");
+      setIsProcessingRecurringExpenses(true);
+
+      try {
+        const templatesSnapshot = await firebase.firestore().collection('recurringExpenses')
+          .where('userId', '==', currentUserUid)
+          .where('isActive', '==', true)
+          // Optionally, filter by nextDueDate <= today, though generateDueExpenses handles this
+          // .where('nextDueDate', '<=', firebase.firestore.Timestamp.now())
+          .get();
+
+        const templates = templatesSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+
+        if (templates.length > 0) {
+          const batch = firebase.firestore().batch();
+          const generatedCount = await generateDueExpenses(currentUserUid, templates, batch);
+
+          if (generatedCount > 0) {
+            await batch.commit();
+            console.log(`Dashboard: Successfully generated ${generatedCount} recurring expense(s).`);
+            // Optional: Alert.alert("Recurring Expenses", `Generated ${generatedCount} expense(s).`);
+            // Re-fetch dashboard data to reflect new expenses, if not handled by listeners elsewhere
+            if (fetchDataAndBalances) fetchDataAndBalances();
+          } else {
+            console.log("Dashboard: No recurring expenses were due to be generated.");
+          }
+        } else {
+          console.log("Dashboard: No active recurring expense templates found.");
+        }
+      } catch (error) {
+        console.error("Dashboard: Error processing recurring expenses: ", error);
+        // Optional: Alert.alert("Error", "Could not process recurring expenses at this time.");
+      } finally {
+        setIsProcessingRecurringExpenses(false);
+      }
+    };
+
+    if (currentUserUid) { // Only run if user is available
+        runRecurringExpenseGeneration();
+    }
+    // This effect should run once on mount when currentUserUid is available,
+    // or if you want it to re-check periodically, this is not the setup for it.
+  }, [currentUserUid]); // Dependency on currentUserUid
+
+
   const fetchDataAndBalances = useCallback(async () => {
     if (!currentUserUid) return;
-
-    setIsLoadingBalances(true);
+    // Not setting isLoadingBalances to true here, as runRecurringExpenseGeneration has its own flag
+    // and this might be called after that. Let main refreshing flag handle visual.
     setRefreshing(true);
 
     let tempOwedToUser = 0;
@@ -135,7 +190,12 @@ function DashboardScreen({ navigation }) {
 
   const renderExpenseItem = ({ item }) => (
     <View style={styles.itemCard}>
-      <Text style={styles.itemDescription}>{item.description}</Text>
+      <View style={styles.itemContent}>
+        {item.recurringExpenseId && (
+          <MaterialCommunityIcons name="update" size={16} color={COLORS.textSecondary} style={styles.recurringIcon} />
+        )}
+        <Text style={[styles.itemDescription, item.recurringExpenseId && styles.descriptionWithIcon]}>{item.description}</Text>
+      </View>
       <Text style={styles.itemAmount}>${item.amount ? item.amount.toFixed(2) : '0.00'}</Text>
     </View>
   );
@@ -148,7 +208,7 @@ function DashboardScreen({ navigation }) {
 
       <View style={styles.balanceOverviewCard}>
         {isLoadingBalances ? (
-          <ActivityIndicator size="large" color={COLORS.primary} />
+          <ActivityIndicator size="large" color={COLORS.primary} style={{marginVertical:20}}/>
         ) : (
           <>
             <View style={styles.balanceRow}>
@@ -318,10 +378,22 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: COLORS.border,
   },
+  itemContent: { // New style to group icon and description
+    flexDirection: 'row',
+    alignItems: 'center',
+    flexShrink: 1, // Allow this group to shrink
+  },
+  recurringIcon: {
+    marginRight: 8,
+  },
+  descriptionWithIcon: {
+    // Adjust if needed, e.g. maxWidth if text is too long next to icon
+    // maxWidth: '90%',
+  },
   itemDescription: {
     fontSize: 16,
     color: COLORS.text,
-    flexShrink: 1, // Allow text to shrink if too long
+    flexShrink: 1,
   },
   itemAmount: {
     fontSize: 16,

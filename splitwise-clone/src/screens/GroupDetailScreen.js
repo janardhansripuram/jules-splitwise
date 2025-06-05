@@ -3,7 +3,8 @@ import { View, Text, FlatList, StyleSheet, ActivityIndicator, Alert, TouchableOp
 import { firebase } from '../../firebaseConfig';
 import { fetchUsernames } from '../utils/userUtils';
 import StyledButton from '../components/StyledButton';
-import { calculateNetBalance, calculateUserShareInExpense } from '../utils/balanceUtils'; // Import balance utils
+import { calculateNetBalance, calculateUserShareInExpense } from '../utils/balanceUtils';
+import { MaterialCommunityIcons } from '@expo/vector-icons'; // Import icon component
 
 const COLORS = {
   background: '#f8f9fa',
@@ -115,7 +116,10 @@ function GroupDetailScreen({ route, navigation }) {
       <TouchableOpacity onPress={() => item.splitType === 'itemized' && navigation.navigate('ItemizedExpenseDetail', { expense: item, usernamesMap: usernamesMap })}>
         <View style={styles.expenseItem}>
           <View style={styles.expenseHeader}>
-            <Text style={styles.expenseDescription}>{item.description}</Text>
+            {item.recurringExpenseId && (
+              <MaterialCommunityIcons name="update" size={16} color={COLORS.textSecondary} style={styles.recurringIcon} />
+            )}
+            <Text style={[styles.expenseDescription, item.recurringExpenseId && styles.descriptionWithIcon]}>{item.description}</Text>
             <Text style={styles.expenseAmount}>${item.amount ? item.amount.toFixed(2) : '0.00'}</Text>
           </View>
           <Text style={styles.expensePaidBy}>Paid by: {item.paidByUid === currentUserUid ? "You" : payerName}</Text>
@@ -228,7 +232,9 @@ const styles = StyleSheet.create({
   memberEmail: { fontSize: 15, color: COLORS.textSecondary, paddingVertical: 5, borderBottomWidth:1, borderBottomColor: COLORS.subtleBorder },
   activityList: { paddingHorizontal: 15 },
   expenseItem: { backgroundColor: COLORS.expenseItemBg, padding: 15, marginBottom: 12, borderRadius: 8, borderWidth: 1, borderColor: COLORS.border },
-  expenseHeader: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 8 },
+  expenseHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems:'center', marginBottom: 8 },
+  recurringIcon: { marginRight: 6 },
+  descriptionWithIcon: { flexShrink:1, maxWidth: '80%' }, // Adjust width if icon makes it too cramped
   expenseDescription: { fontSize: 16, fontWeight: '500', color: COLORS.text, flexShrink:1 },
   expenseAmount: { fontSize: 16, fontWeight: 'bold', color: COLORS.primary },
   expensePaidBy: { fontSize: 14, color: COLORS.textSecondary, marginBottom: 4 },
