@@ -1,11 +1,13 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { View, Text, FlatList, StyleSheet, ActivityIndicator, Alert, TouchableOpacity, RefreshControl, Modal } from 'react-native'; // Added Modal
+import { View, Text, FlatList, StyleSheet, ActivityIndicator, Alert, TouchableOpacity, RefreshControl, Modal, Dimensions } from 'react-native';
 import { firebase } from '../../firebaseConfig';
 import { fetchUsernames } from '../utils/userUtils';
 import StyledButton from '../components/StyledButton';
-import { calculateNetBalance, calculateUserShareInExpense, calculateAllMemberBalances } from '../utils/balanceUtils'; // Import all balance utils
-import { simplifyDebts } from '../utils/debtUtils'; // Import debt utils
+import { calculateNetBalance, calculateUserShareInExpense, calculateAllMemberBalances } from '../utils/balanceUtils';
+import { simplifyDebts } from '../utils/debtUtils';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
+import { PieChart } from 'react-native-chart-kit';
+import { getCategoryFromDescription, CATEGORY_COLORS } from '../../utils/categoryUtils'; // Adjust path as necessary
 
 const COLORS = { /* ... (palette as before) ... */
   background: '#f8f9fa', cardBackground: '#ffffff', text: '#212529', textSecondary: '#6c757d',
@@ -22,9 +24,13 @@ function GroupDetailScreen({ route, navigation }) {
   const [usernamesMap, setUsernamesMap] = useState({}); // Still useful for quick lookups outside groupDetails context
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const [currentUserNetBalance, setCurrentUserNetBalance] = useState({ netBalance: 0, settled: true }); // For current user's summary
-  const [groupMemberBalances, setGroupMemberBalances] = useState({}); // { uid: balance } For all members
+  const [balances, setBalances] = useState({ netBalance: 0, settled: true });
+  const [groupMemberBalances, setGroupMemberBalances] = useState({});
   const [currentUserUid, setCurrentUserUid] = useState(null);
+
+  // Chart State
+  const [pieChartData, setPieChartData] = useState([]);
+  const [isLoadingChart, setIsLoadingChart] = useState(true);
 
   // Simplify Debts Modal State
   const [isSimplifyModalVisible, setIsSimplifyModalVisible] = useState(false);
@@ -114,7 +120,34 @@ function GroupDetailScreen({ route, navigation }) {
     const currentUserBalance = allBalances[currentUserUid] || 0;
     setCurrentUserNetBalance({ netBalance: currentUserBalance, settled: Math.abs(currentUserBalance) < 0.01 });
 
-  }, [groupExpenses, groupSettlements, groupDetails, currentUserUid, loading, refreshing]);
+  }, [groupExpenses, groupSettlements, groupDetails, currentUserUid, loading, refreshing]); // Added groupDetails
+
+  // Prepare Pie Chart Data
+  useEffect(() => {
+    if (groupExpenses && groupExpenses.length > 0) {
+      setIsLoadingChart(true);
+      const categorySpending = {};
+      groupExpenses.forEach(expense => {
+        const category = getCategoryFromDescription(expense.description);
+        categorySpending[category] = (categorySpending[category] || 0) + parseFloat(expense.amount || 0);
+      });
+
+      const chartData = Object.keys(categorySpending)
+        .filter(category => categorySpending[category] > 0)
+        .map(category => ({
+          name: category,
+          population: parseFloat(categorySpending[category].toFixed(2)),
+          color: CATEGORY_COLORS[category] || CATEGORY_COLORS['Other'],
+          legendFontColor: '#555',
+          legendFontSize: 14,
+        }));
+      setPieChartData(chartData);
+      setIsLoadingChart(false);
+    } else {
+      setPieChartData([]);
+      setIsLoadingChart(false);
+    }
+  }, [groupExpenses]);
 
 
   const handleSimplifyDebts = () => {
@@ -210,10 +243,59 @@ function GroupDetailScreen({ route, navigation }) {
 
   const combinedActivity = [...groupExpenses, ...groupSettlements]
     .sort((a, b) => (b.createdAt?.toDate?.() || 0) - (a.createdAt?.toDate?.() || 0));
-  const renderActivityItem = ({ item }) => { /* ... (no change from previous) ... */
+  const renderActivityItem = ({ item }) => {
     if (item.type === 'settlement') { return renderSettlementItem({ item }); }
     return renderExpenseItem({ item });
   };
+
+  const screenWidth = Dimensions.get('window').width;
+
+  const renderChartSection = () => {
+    if (isLoadingChart) {
+      return (
+        <View style={[styles.chartCardContent, styles.loadingContainer]}>
+          <ActivityIndicator size="large" color={COLORS.primary} />
+          <Text style={styles.loadingText}>Loading Chart...</Text>
+        </View>
+      );
+    }
+    if (pieChartData.length === 0) {
+      return (
+        <View style={[styles.chartCardContent, styles.loadingContainer]}>
+           <MaterialCommunityIcons name="chart-arc-variant" size={48} color={COLORS.textSecondary} />
+          <Text style={styles.noDataText}>No spending data to display chart.</Text>
+        </View>
+      );
+    }
+    return (
+      <View style={styles.chartCardContent}>
+        <PieChart
+          data={pieChartData}
+          width={screenWidth - (styles.chartCard.marginHorizontal * 2) - (styles.chartCardContent.padding * 2) -10} // Adjusted width calculation
+          height={230}
+          chartConfig={{
+            backgroundColor: COLORS.cardBackground, // Chart background, not card itself
+            backgroundGradientFrom: COLORS.cardBackground,
+            backgroundGradientTo: COLORS.cardBackground,
+            decimalPlaces: 2,
+            color: (opacity = 1) => `rgba(50, 50, 50, ${opacity})`, // Darker text for chart labels if needed
+            labelColor: (opacity = 1) => `rgba(50, 50, 50, ${opacity})`, // Darker text for legend
+            style: { borderRadius: 10 }, // Style for chart area itself if any
+            propsForLabels: { // Style for the percentage labels on slices
+                fontSize: 11,
+                // fill: '#fff' // Example if slices are dark
+            },
+          }}
+          accessor={"population"}
+          backgroundColor={"transparent"} // Pie chart background itself transparent
+          paddingLeft={"10"} // Fine-tune for centering based on your data/labels
+          absolute // Show absolute values if desired
+          // hasLegend={true} // default is true
+        />
+      </View>
+    );
+  };
+
 
   return (
     <View style={styles.container}>
@@ -225,7 +307,7 @@ function GroupDetailScreen({ route, navigation }) {
               <StyledButton title="Invite Member" onPress={() => navigation.navigate('InviteMembers', { groupId: groupId })} type="secondary" style={styles.actionButton}/>
               <StyledButton title="Record Payment" onPress={() => navigation.navigate('RecordPayment', { groupId: groupId })} type="secondary" style={styles.actionButton}/>
             </View>
-            <StyledButton title="Simplify Group Debts" onPress={handleSimplifyDebts} type="outline" style={styles.simplifyButton} disabled={isCalculatingSimplifiedDebts || loading}/>
+            <StyledButton title="Simplify Group Debts" onPress={handleSimplifyDebts} type="outline" style={styles.simplifyButton} disabled={isCalculatingSimplifiedDebts || loading || Object.keys(groupMemberBalances).length === 0}/>
 
             <View style={styles.membersContainer}>
               <Text style={styles.sectionTitle}>Accepted Members & Balances</Text>
@@ -244,6 +326,16 @@ function GroupDetailScreen({ route, navigation }) {
               {(!groupDetails?.members || groupDetails.members.filter(m => m.status === 'accepted').length === 0) &&
                 <Text style={styles.noItemsText}>No other accepted members.</Text>}
             </View>
+
+            {/* Pie Chart Section - Using custom card style */}
+            <View style={styles.chartCard}>
+                <View style={styles.titleRow}>
+                    <MaterialCommunityIcons name="chart-pie" size={24} color={COLORS.primary} style={styles.titleIcon} />
+                    <Text style={styles.chartTitle}>Spending by Category</Text>
+                </View>
+                {renderChartSection()}
+            </View>
+
             <Text style={styles.sectionTitle}>Group Activity</Text>
           </>
         }
@@ -258,7 +350,7 @@ function GroupDetailScreen({ route, navigation }) {
       <Modal visible={isSimplifyModalVisible} onRequestClose={() => setIsSimplifyModalVisible(false)} animationType="slide" transparent={true}>
         <View style={styles.modalContainer}>
           <View style={styles.modalContent}>
-            <Text style={styles.modalTitle}>Simplified Debts</Text>
+            <Text style={styles.modalTitle}>Simplified Group Debts</Text>
             {isCalculatingSimplifiedDebts ? <ActivityIndicator/> :
               simplifiedTransactionsList.length === 0 ?
               <Text style={styles.noItemsText}>Everyone is settled up, or no simplification needed!</Text> :
