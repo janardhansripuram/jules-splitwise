@@ -1,56 +1,46 @@
 import React from 'react';
-import { TextInput, StyleSheet } from 'react-native';
-
-import { useState } from 'react'; // Moved to top
-
-const COLORS = {
-  cardBackground: '#ffffff',
-  text: '#212529',
-  placeholder: '#6c757d',
-  border: '#ced4da',
-  primary: '#007bff', // For focus border color
-};
+import { StyleSheet } from 'react-native';
+import { TextInput as PaperTextInput, useTheme } from 'react-native-paper';
 
 const StyledTextInput = (props) => {
-  const [isFocused, setIsFocused] = useState(false); // Optional: for focus styling
+  const theme = useTheme();
+  const { style, label, mode = 'outlined', ...rest } = props; // Default mode to outlined
+
+  // Note: PaperTextInput handles its own focus styling (border color, label animation)
+  // based on the theme's primary color. Manual isFocused state is not typically needed.
+  // Placeholder color is also handled by the theme.
 
   return (
-    <TextInput
-      {...props}
-      style={[
-        styles.input,
-        isFocused && styles.inputFocused, // Apply focus style
-        props.style, // Allow custom styles to be passed
-      ]}
-      placeholderTextColor={COLORS.placeholder}
-      onFocus={() => setIsFocused(true)}
-      onBlur={() => setIsFocused(false)}
+    <PaperTextInput
+      label={label} // PaperTextInput uses 'label' prop which acts as placeholder when not focused
+      mode={mode}
+      style={[styles.inputDefault, style]} // Apply default styles, then custom ones
+      theme={{ roundness: theme.roundness }} // Ensure component uses theme roundness
+      // Pass common props directly. Specific PaperTextInput props can also be passed.
+      // placeholder={props.placeholder} // Can still use placeholder if label is not desired or for specific cases
+      // value={props.value}
+      // onChangeText={props.onChangeText}
+      // secureTextEntry={props.secureTextEntry}
+      // keyboardType={props.keyboardType}
+      // autoCapitalize={props.autoCapitalize}
+      // disabled={props.disabled}
+      // error={props.error}
+      // left={props.left}
+      // right={props.right}
+      {...rest} // Pass all other props through
     />
   );
 };
 
 const styles = StyleSheet.create({
-  input: {
-    backgroundColor: COLORS.cardBackground,
-    color: COLORS.text,
-    borderWidth: 1,
-    borderColor: COLORS.border,
-    paddingVertical: 12,
-    paddingHorizontal: 15,
-    marginBottom: 15, // Consistent margin
-    borderRadius: 8,
-    fontSize: 16,
-    width: '100%', // Default to full width
+  inputDefault: {
+    marginBottom: 16, // Consistent vertical margin
+    // backgroundColor: 'transparent', // Outlined mode usually has transparent bg by default with theme
+                                   // Or theme.colors.surface for flat mode if needed.
+    // fontSize: 16, // Default font size is usually good from theme
+    // width: '100%', // PaperTextInput is often full width by default in its container
   },
-  inputFocused: {
-    borderColor: COLORS.primary, // Highlight border on focus
-    // Example: add a subtle shadow or thicker border
-    // shadowColor: COLORS.primary,
-    // shadowOffset: { width: 0, height: 0 },
-    // shadowOpacity: 0.25,
-    // shadowRadius: 3.84,
-    // elevation: 5,
-  },
+  // Removed inputFocused style as PaperTextInput handles focus based on theme.
 });
 
 export default StyledTextInput;

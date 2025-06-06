@@ -1,8 +1,8 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, FlatList, StyleSheet, Alert, RefreshControl, ActivityIndicator } from 'react-native'; // Added ActivityIndicator
+import { View, FlatList, StyleSheet, Alert, RefreshControl } from 'react-native';
 import { firebase } from '../../firebaseConfig';
-import StyledButton from '../components/StyledButton';
-import { MaterialCommunityIcons } from '@expo/vector-icons'; // Import icon component
+import { Button as PaperButton, Text as PaperText, Card as PaperCard, ActivityIndicator as PaperActivityIndicator, useTheme, MD3Colors } from 'react-native-paper';
+import { MaterialCommunityIcons } from '@expo/vector-icons';
 
 const COLORS = {
   background: '#f8f9fa',
@@ -18,15 +18,21 @@ const COLORS = {
 function DashboardScreen({ navigation }) {
   const [personalExpenses, setPersonalExpenses] = useState([]);
   // const [userOverallBalance, setUserOverallBalance] = useState(0); // Replaced by specific states
+// Import balance utilities if they are not already imported (assuming they are used)
+import { calculateNetBalance, calculateUserShareInExpense } from '../utils/balanceUtils';
+import { generateDueExpenses } from '../utils/recurringExpenseManager'; // Corrected import
+
+// Removed COLORS constant, will use theme from useTheme()
+
+function DashboardScreen({ navigation }) {
+  const theme = useTheme(); // theme is already used
+  const [personalExpenses, setPersonalExpenses] = useState([]);
   const [overallOwedToUser, setOverallOwedToUser] = useState(0);
   const [overallUserOwes, setOverallUserOwes] = useState(0);
   const [isLoadingBalances, setIsLoadingBalances] = useState(true);
-  const [isProcessingRecurringExpenses, setIsProcessingRecurringExpenses] = useState(false); // New state
+  const [isProcessingRecurringExpenses, setIsProcessingRecurringExpenses] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [currentUserUid, setCurrentUserUid] = useState(null);
-
-  // Import recurring expense manager
-  const { generateDueExpenses } = require('../utils/recurringExpenseManager');
 
   useEffect(() => {
     const user = firebase.auth().currentUser;
@@ -37,62 +43,12 @@ function DashboardScreen({ navigation }) {
     }
   }, [navigation]);
 
-  // useEffect for Recurring Expense Generation
-  useEffect(() => {
-    const runRecurringExpenseGeneration = async () => {
-      if (isProcessingRecurringExpenses || !currentUserUid) {
-        return;
-      }
-      console.log("Dashboard: Checking for recurring expenses to generate...");
-      setIsProcessingRecurringExpenses(true);
-
-      try {
-        const templatesSnapshot = await firebase.firestore().collection('recurringExpenses')
-          .where('userId', '==', currentUserUid)
-          .where('isActive', '==', true)
-          // Optionally, filter by nextDueDate <= today, though generateDueExpenses handles this
-          // .where('nextDueDate', '<=', firebase.firestore.Timestamp.now())
-          .get();
-
-        const templates = templatesSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-
-        if (templates.length > 0) {
-          const batch = firebase.firestore().batch();
-          const generatedCount = await generateDueExpenses(currentUserUid, templates, batch);
-
-          if (generatedCount > 0) {
-            await batch.commit();
-            console.log(`Dashboard: Successfully generated ${generatedCount} recurring expense(s).`);
-            // Optional: Alert.alert("Recurring Expenses", `Generated ${generatedCount} expense(s).`);
-            // Re-fetch dashboard data to reflect new expenses, if not handled by listeners elsewhere
-            if (fetchDataAndBalances) fetchDataAndBalances();
-          } else {
-            console.log("Dashboard: No recurring expenses were due to be generated.");
-          }
-        } else {
-          console.log("Dashboard: No active recurring expense templates found.");
-        }
-      } catch (error) {
-        console.error("Dashboard: Error processing recurring expenses: ", error);
-        // Optional: Alert.alert("Error", "Could not process recurring expenses at this time.");
-      } finally {
-        setIsProcessingRecurringExpenses(false);
-      }
-    };
-
-    if (currentUserUid) { // Only run if user is available
-        runRecurringExpenseGeneration();
-    }
-    // This effect should run once on mount when currentUserUid is available,
-    // or if you want it to re-check periodically, this is not the setup for it.
-  }, [currentUserUid]); // Dependency on currentUserUid
-
-
   const fetchDataAndBalances = useCallback(async () => {
     if (!currentUserUid) return;
-    // Not setting isLoadingBalances to true here, as runRecurringExpenseGeneration has its own flag
-    // and this might be called after that. Let main refreshing flag handle visual.
     setRefreshing(true);
+    // We can set isLoadingBalances true here if this is the primary data load point
+    // For recurring expenses, it has its own flag, but balances need this.
+    setIsLoadingBalances(true);
 
     let tempOwedToUser = 0;
     let tempUserOwes = 0;
@@ -188,74 +144,105 @@ function DashboardScreen({ navigation }) {
     fetchDataAndBalances();
   };
 
+  // useEffect for Recurring Expense Generation (logic remains largely the same, ensure generateDueExpenses is imported correctly)
+  useEffect(() => {
+    const runRecurringExpenseGeneration = async () => {
+      if (isProcessingRecurringExpenses || !currentUserUid) return;
+      setIsProcessingRecurringExpenses(true);
+      try {
+        const templatesSnapshot = await firebase.firestore().collection('recurringExpenses')
+          .where('userId', '==', currentUserUid).where('isActive', '==', true).get();
+        const templates = templatesSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+        if (templates.length > 0) {
+          const batch = firebase.firestore().batch();
+          const generatedCount = await generateDueExpenses(currentUserUid, templates, batch); // Ensure this utility is correctly imported
+          if (generatedCount > 0) {
+            await batch.commit();
+            if (fetchDataAndBalances) fetchDataAndBalances();
+          }
+        }
+      } catch (error) { console.error("Dashboard: Error processing recurring expenses: ", error); }
+      finally { setIsProcessingRecurringExpenses(false); }
+    };
+    if (currentUserUid) runRecurringExpenseGeneration();
+  }, [currentUserUid, fetchDataAndBalances, isProcessingRecurringExpenses]); // Added isProcessingRecurringExpenses and fetchDataAndBalances to deps
+
+
+  const onRefresh = fetchDataAndBalances; // Simplified onRefresh
+
   const renderExpenseItem = ({ item }) => (
-    <View style={styles.itemCard}>
-      <View style={styles.itemContent}>
-        {item.recurringExpenseId && (
-          <MaterialCommunityIcons name="update" size={16} color={COLORS.textSecondary} style={styles.recurringIcon} />
-        )}
-        <Text style={[styles.itemDescription, item.recurringExpenseId && styles.descriptionWithIcon]}>{item.description}</Text>
-      </View>
-      <Text style={styles.itemAmount}>${item.amount ? item.amount.toFixed(2) : '0.00'}</Text>
-    </View>
+    <PaperCard style={styles.itemCard} elevation={1}>
+      <PaperCard.Content style={styles.itemCardContent}>
+        <View style={styles.itemDetails}>
+          {item.recurringExpenseId && (
+            <MaterialCommunityIcons name="update" size={18} color={theme.colors.onSurfaceVariant} style={styles.recurringIcon} />
+          )}
+          <PaperText variant="bodyLarge" style={styles.itemDescription} numberOfLines={1}>{item.description}</PaperText>
+        </View>
+        <PaperText variant="bodyLarge" style={[styles.itemAmount, {color: theme.colors.primary}]}>${item.amount ? item.amount.toFixed(2) : '0.00'}</PaperText>
+      </PaperCard.Content>
+    </PaperCard>
   );
 
   return (
-    <View style={styles.container}>
-      <View style={styles.headerContainer}>
-        <Text style={styles.headerTitle}>Dashboard</Text>
+    <View style={[styles.container, {backgroundColor: theme.colors.background}]}>
+      {/* Header with a slightly more prominent background from theme, or surface for standard look */}
+      <View style={[styles.headerContainer, {backgroundColor: theme.colors.surfaceVariant /* or theme.colors.primary */}]}>
+        <PaperText variant="headlineMedium" style={[styles.headerTitle, {color: theme.colors.onSurfaceVariant /* or theme.colors.onPrimary */}]}>Dashboard</PaperText>
       </View>
 
-      <View style={styles.balanceOverviewCard}>
-        {isLoadingBalances ? (
-          <ActivityIndicator size="large" color={COLORS.primary} style={{marginVertical:20}}/>
-        ) : (
-          <>
-            <View style={styles.balanceRow}>
-              <Text style={styles.balanceTextLabel}>Overall, you are owed:</Text>
-              <Text style={[styles.balanceTextValue, styles.positiveBalance]}>${overallOwedToUser.toFixed(2)}</Text>
-            </View>
-            <View style={styles.balanceRow}>
-              <Text style={styles.balanceTextLabel}>Overall, you owe:</Text>
-              <Text style={[styles.balanceTextValue, styles.negativeBalance]}>${overallUserOwes.toFixed(2)}</Text>
-            </View>
-            <View style={styles.netBalanceSeparator} />
-            <View style={styles.balanceRow}>
-              <Text style={styles.netBalanceLabel}>Net Balance:</Text>
-              <Text style={[
-                  styles.netBalanceValue,
-                  (overallOwedToUser - overallUserOwes) >= 0 ? styles.positiveBalance : styles.negativeBalance
-              ]}>
-                {(overallOwedToUser - overallUserOwes) >= 0 ?
-                  `You are owed $${(overallOwedToUser - overallUserOwes).toFixed(2)}` :
-                  `You owe $${Math.abs(overallOwedToUser - overallUserOwes).toFixed(2)}`
-                }
-                {(overallOwedToUser - overallUserOwes) === 0 && "You are settled up!"}
-              </Text>
-            </View>
-          </>
-        )}
-      </View>
+      <PaperCard style={styles.balanceOverviewCard} elevation={2}>
+        <PaperCard.Title title="Financial Overview" titleVariant="titleLarge" titleStyle={{color: theme.colors.onSurface}}/>
+        <PaperCard.Content>
+          {isLoadingBalances ? (
+            <PaperActivityIndicator animating={true} color={theme.colors.primary} size="large" style={{marginVertical:20}}/>
+          ) : (
+            <>
+              <View style={styles.balanceRow}>
+                <PaperText variant="titleMedium">Overall, you are owed:</PaperText>
+                <PaperText variant="titleMedium" style={{color: theme.colors.customSuccess || MD3Colors.green600}}>${overallOwedToUser.toFixed(2)}</PaperText>
+              </View>
+              <View style={styles.balanceRow}>
+                <PaperText variant="titleMedium">Overall, you owe:</PaperText>
+                <PaperText variant="titleMedium" style={{color: theme.colors.error}}>${overallUserOwes.toFixed(2)}</PaperText>
+              </View>
+              <View style={styles.netBalanceSeparator} />
+              <View style={styles.balanceRow}>
+                <PaperText variant="titleLarge">Net Balance:</PaperText>
+                <PaperText variant="titleLarge" style={{ color: (overallOwedToUser - overallUserOwes) >= 0 ? (theme.colors.customSuccess || MD3Colors.green600) : theme.colors.error }}>
+                  {(overallOwedToUser - overallUserOwes) >= 0 ?
+                    `You are owed $${(overallOwedToUser - overallUserOwes).toFixed(2)}` :
+                    `You owe $${Math.abs(overallOwedToUser - overallUserOwes).toFixed(2)}`
+                  }
+                  {(overallOwedToUser - overallUserOwes) === 0 && "You are settled up!"}
+                </PaperText>
+              </View>
+            </>
+          )}
+        </PaperCard.Content>
+      </PaperCard>
 
       <View style={styles.buttonGrid}>
-        <StyledButton title="Add Expense" onPress={() => navigation.navigate('AddExpense')} type="primary" style={styles.gridButton} />
-        <StyledButton title="My Groups" onPress={() => navigation.navigate('GroupsList')} type="primary" style={styles.gridButton} />
-        <StyledButton title="Pending Invites" onPress={() => navigation.navigate('PendingInvitations')} type="primary" style={styles.gridButton} />
-        <StyledButton title="Friends" onPress={() => navigation.navigate('Friends')} type="primary" style={styles.gridButton} />
-        <StyledButton title="Recurring" onPress={() => navigation.navigate('RecurringExpensesList')} type="primary" style={styles.gridButton} />
+        <PaperButton mode="contained" onPress={() => navigation.navigate('AddExpense')} style={styles.gridButton} labelStyle={styles.gridButtonLabel}>Add Expense</PaperButton>
+        <PaperButton mode="contained" onPress={() => navigation.navigate('GroupsList')} style={styles.gridButton} labelStyle={styles.gridButtonLabel}>My Groups</PaperButton>
+        <PaperButton mode="contained" onPress={() => navigation.navigate('PendingInvitations')} style={styles.gridButton} labelStyle={styles.gridButtonLabel}>Invites</PaperButton>
+        <PaperButton mode="contained" onPress={() => navigation.navigate('Friends')} style={styles.gridButton} labelStyle={styles.gridButtonLabel}>Friends</PaperButton>
+        <PaperButton mode="contained" onPress={() => navigation.navigate('RecurringExpensesList')} style={styles.gridButton} labelStyle={styles.gridButtonLabel}>Recurring</PaperButton>
       </View>
 
-      <Text style={styles.sectionTitle}>Recent Personal Expenses</Text>
-      {personalExpenses.length === 0 && !refreshing && !isLoadingBalances ? (
-        <Text style={styles.noItemsText}>No personal expenses recorded yet.</Text>
+      <PaperText variant="titleLarge" style={[styles.sectionTitle, {color: theme.colors.onBackground}]}>Recent Personal Expenses</PaperText>
+      {isLoadingBalances && personalExpenses.length === 0 && !refreshing ? null :
+        personalExpenses.length === 0 && !refreshing ? (
+        <PaperText style={[styles.noItemsText, {color: theme.colors.onSurfaceVariant}]}>No personal expenses recorded yet.</PaperText>
       ) : (
         <FlatList
           data={personalExpenses}
           renderItem={renderExpenseItem}
           keyExtractor={item => item.id}
           style={styles.list}
-          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} colors={[COLORS.primary]}/>}
-          ListEmptyComponent={isLoadingBalances || refreshing ? <ActivityIndicator color={COLORS.primary} style={{marginTop:20}}/> : null}
+          contentContainerStyle={{paddingBottom:20}}
+          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} colors={[theme.colors.primary]} tintColor={theme.colors.primary}/>}
+          ListEmptyComponent={isLoadingBalances || refreshing ? <PaperActivityIndicator color={theme.colors.primary} style={{marginTop:20}}/> : null}
         />
       )}
     </View>
@@ -263,149 +250,24 @@ function DashboardScreen({ navigation }) {
 }
 
 const styles = StyleSheet.create({
-  // ... (keep existing styles for container, header, buttons, list, itemCard, etc.)
-  // Add new styles for balance overview
-  balanceOverviewCard: {
-    backgroundColor: COLORS.cardBackground,
-    padding: 20,
-    marginHorizontal: 15,
-    borderRadius: 10,
-    marginBottom: 20,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 3.84,
-    elevation: 5,
-  },
-  balanceRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginVertical: 6,
-  },
-  balanceTextLabel: {
-    fontSize: 16,
-    color: COLORS.textSecondary,
-  },
-  balanceTextValue: {
-    fontSize: 18,
-    fontWeight: '600',
-  },
-  netBalanceSeparator: {
-    height: 1,
-    backgroundColor: COLORS.border,
-    marginVertical: 10,
-  },
-  netBalanceLabel: {
-    fontSize: 17,
-    fontWeight: 'bold',
-    color: COLORS.text,
-  },
-  netBalanceValue: {
-    fontSize: 17,
-    fontWeight: 'bold',
-  },
-  // Ensure other styles from previous version are here
-  container: {
-    flex: 1,
-    backgroundColor: COLORS.background,
-  },
-  headerContainer: {
-    backgroundColor: COLORS.primary,
-    paddingHorizontal: 20,
-    paddingTop: 40, // Adjust for status bar if needed
-    paddingBottom: 20,
-    marginBottom: 10,
-  },
-  headerTitle: {
-    fontSize: 28,
-    fontWeight: 'bold',
-    color: COLORS.cardBackground, // White text on primary bg
-    textAlign: 'center',
-  },
-  balanceSummaryCard: { // Optional: if you add an overall balance
-    backgroundColor: COLORS.cardBackground,
-    padding: 15,
-    borderRadius: 10,
-    marginTop: 15,
-    alignItems: 'center',
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 3.84,
-    elevation: 5,
-  },
-  balanceLabel: {
-    fontSize: 16,
-    color: COLORS.textSecondary,
-  },
-  balanceValue: {
-    fontSize: 24,
-    fontWeight: 'bold',
-    marginTop: 5,
-  },
-  positiveBalance: { color: COLORS.accent },
-  negativeBalance: { color: COLORS.danger },
-  buttonGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap', // Allow buttons to wrap
-    justifyContent: 'space-between', // Distribute space
-    paddingHorizontal: 15,
-    marginBottom: 20,
-  },
-  gridButton: {
-    width: '48%', // Approximately two buttons per row with some space
-    marginVertical: 5, // Add vertical margin for wrapped buttons
-  },
-  sectionTitle: {
-    fontSize: 20,
-    fontWeight: '600',
-    color: COLORS.text,
-    paddingHorizontal: 20,
-    marginBottom: 10,
-  },
-  list: {
-    paddingHorizontal: 15,
-  },
-  itemCard: {
-    backgroundColor: COLORS.cardBackground,
-    padding: 15,
-    borderRadius: 8,
-    marginBottom: 10,
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    borderWidth: 1,
-    borderColor: COLORS.border,
-  },
-  itemContent: { // New style to group icon and description
-    flexDirection: 'row',
-    alignItems: 'center',
-    flexShrink: 1, // Allow this group to shrink
-  },
-  recurringIcon: {
-    marginRight: 8,
-  },
-  descriptionWithIcon: {
-    // Adjust if needed, e.g. maxWidth if text is too long next to icon
-    // maxWidth: '90%',
-  },
-  itemDescription: {
-    fontSize: 16,
-    color: COLORS.text,
-    flexShrink: 1,
-  },
-  itemAmount: {
-    fontSize: 16,
-    fontWeight: 'bold',
-    color: COLORS.primary,
-  },
-  noItemsText: {
-    textAlign: 'center',
-    marginTop: 20,
-    fontSize: 16,
-    color: COLORS.textSecondary,
-  },
+  container: { flex: 1, /* backgroundColor from theme */ },
+  headerContainer: { paddingHorizontal: 20, paddingTop: 40, paddingBottom: 20, marginBottom: 15, }, // Adjusted paddingTop
+  headerTitle: { textAlign: 'center', fontWeight:'bold' },
+  balanceOverviewCard: { marginHorizontal: 15, marginBottom: 20, },
+  balanceRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginVertical: 8, },
+  netBalanceSeparator: { height: 1, /* backgroundColor from theme.colors.outlineVariant */ marginVertical: 12, },
+  buttonGrid: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-around', paddingHorizontal: 10, marginBottom: 20, },
+  gridButton: { width: '48%', marginVertical: 6, borderRadius: theme.roundness * 1.5 }, // Example of using theme roundness
+  gridButtonLabel: { fontSize: 13, paddingVertical:2 },
+  sectionTitle: { marginHorizontal: 20, marginBottom: 12, marginTop:10, fontWeight:'bold'},
+  list: { paddingHorizontal: 15, },
+  itemCard: { marginBottom: 10, borderWidth:0, borderRadius: theme.roundness }, // Using PaperCard elevation and theme roundness
+  itemCardContent: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 12, paddingHorizontal:16 },
+  itemDetails: { flexDirection: 'row', alignItems: 'center', flexShrink:1, marginRight:8 },
+  recurringIcon: { marginRight: 10, /* color from theme.colors.onSurfaceVariant */ },
+  itemDescription: { flexShrink: 1, /* color from theme.colors.onSurface */ },
+  itemAmount: { fontWeight: 'bold', /* color from theme.colors.primary */ },
+  noItemsText: { textAlign: 'center', marginVertical: 20, fontSize: 16, /* color from theme.colors.onSurfaceVariant */ },
 });
 
 export default DashboardScreen;

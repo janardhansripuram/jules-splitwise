@@ -1,17 +1,10 @@
 import React, { useState } from 'react';
-import { View, Text, StyleSheet, Alert, TouchableOpacity } from 'react-native';
+import { View, StyleSheet, Alert, TouchableOpacity } from 'react-native';
 import { firebase } from '../../firebaseConfig';
-import StyledButton from '../components/StyledButton';
-import StyledTextInput from '../components/StyledTextInput';
-
-const COLORS = {
-  background: '#f8f9fa',
-  text: '#212529',
-  primary: '#007bff',
-  secondaryText: '#6c757d',
-};
+import { Button as PaperButton, TextInput as PaperTextInput, Text as PaperText, useTheme, ActivityIndicator as PaperActivityIndicator } from 'react-native-paper';
 
 function SignUpScreen({ navigation }) {
+  const theme = useTheme();
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -41,7 +34,6 @@ function SignUpScreen({ navigation }) {
         await firebase.firestore().collection('users').doc(user.uid).set(userDocData);
 
         const groupsRef = firebase.firestore().collection('groups');
-        // Query for groups where this email was invited before they had an account
         const querySnapshot = await groupsRef.where('members', 'array-contains', { email: normalizedEmail, status: 'pending_signup' }).get();
 
         if (!querySnapshot.empty) {
@@ -56,54 +48,69 @@ function SignUpScreen({ navigation }) {
             batch.update(groupDoc.ref, { members: updatedMembers });
           });
           await batch.commit();
-          console.log(`Updated ${querySnapshot.size} pending_signup invitations for ${normalizedEmail}`);
+          // console.log(`Updated ${querySnapshot.size} pending_signup invitations for ${normalizedEmail}`);
         }
-        // Navigation to the main app will be handled by onAuthStateChanged listener in App.js
+        // Navigation is handled by onAuthStateChanged in App.js
       }
     } catch (error) {
       Alert.alert("Sign Up Failed", error.message);
-      console.error("Sign up error: ", error);
+      // console.error("Sign up error: ", error);
     }
     setLoading(false);
   };
 
   return (
-    <View style={styles.container}>
-      <Text style={styles.title}>Create Account</Text>
-      <StyledTextInput
-        placeholder="Full Name"
+    <View style={[styles.container, { backgroundColor: theme.colors.background }]}>
+      <PaperText variant="headlineLarge" style={[styles.title, { color: theme.colors.primary }]}>Create Account</PaperText>
+      <PaperTextInput
+        label="Full Name"
         value={name}
         onChangeText={setName}
         autoCapitalize="words"
         textContentType="name"
         disabled={loading}
+        style={styles.input}
+        mode="outlined"
       />
-      <StyledTextInput
-        placeholder="Email Address"
+      <PaperTextInput
+        label="Email Address"
         value={email}
         onChangeText={setEmail}
         keyboardType="email-address"
         autoCapitalize="none"
         textContentType="emailAddress"
         disabled={loading}
+        style={styles.input}
+        mode="outlined"
       />
-      <StyledTextInput
-        placeholder="Password (min. 6 characters)"
+      <PaperTextInput
+        label="Password"
+        placeholder="Min. 6 characters"
         value={password}
         onChangeText={setPassword}
         secureTextEntry
-        textContentType="newPassword" // Helps with password generation suggestions
+        textContentType="newPassword"
         disabled={loading}
+        style={styles.input}
+        mode="outlined"
       />
-      <StyledButton
-        title={loading ? "Creating Account..." : "Sign Up"}
-        onPress={handleSignUp}
-        type="primary"
-        disabled={loading}
-        style={{width: '100%', marginTop: 10}}
-      />
+      {loading ? (
+        <PaperActivityIndicator animating={true} color={theme.colors.primary} size="large" style={styles.loader} />
+      ) : (
+        <PaperButton
+          mode="contained"
+          onPress={handleSignUp}
+          disabled={loading}
+          style={styles.button}
+          labelStyle={styles.buttonLabel}
+        >
+          Sign Up
+        </PaperButton>
+      )}
       <TouchableOpacity onPress={() => navigation.navigate('Login')} disabled={loading} style={styles.switchButton}>
-        <Text style={styles.switchText}>Already have an account? <Text style={styles.loginLink}>Login</Text></Text>
+        <PaperText variant="bodyMedium" style={{ color: theme.colors.onSurfaceVariant }}>
+          Already have an account? <PaperText variant="bodyMedium" style={{ color: theme.colors.primary, fontWeight: 'bold' }}>Login</PaperText>
+        </PaperText>
       </TouchableOpacity>
     </View>
   );
@@ -114,27 +121,29 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: 'center',
     padding: 25,
-    backgroundColor: COLORS.background,
   },
   title: {
-    fontSize: 32,
-    fontWeight: 'bold',
-    color: COLORS.text,
     textAlign: 'center',
     marginBottom: 35,
   },
+  input: {
+    marginBottom: 15,
+  },
+  button: {
+    marginTop: 10,
+    paddingVertical: 8,
+  },
+  buttonLabel: {
+    fontSize: 16,
+  },
+  loader: {
+    marginTop: 20,
+    marginBottom: 20,
+  },
   switchButton: {
-    marginTop: 25,
+    marginTop: 30,
     alignItems: 'center',
   },
-  switchText: {
-    fontSize: 16,
-    color: COLORS.secondaryText,
-  },
-  loginLink: {
-    color: COLORS.primary,
-    fontWeight: 'bold',
-  }
 });
 
 export default SignUpScreen;

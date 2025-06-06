@@ -1,42 +1,34 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { View, Text, FlatList, StyleSheet, ActivityIndicator, Alert, TouchableOpacity, RefreshControl, Modal, Dimensions } from 'react-native';
+import { View, FlatList, StyleSheet, Alert, TouchableOpacity, RefreshControl, Dimensions, ScrollView } from 'react-native';
 import { firebase } from '../../firebaseConfig';
 import { fetchUsernames } from '../utils/userUtils';
-import StyledButton from '../components/StyledButton';
+import { Button as PaperButton, Text as PaperText, Card as PaperCard, ActivityIndicator as PaperActivityIndicator, useTheme, Portal, Dialog, MD3Colors } from 'react-native-paper';
 import { calculateNetBalance, calculateUserShareInExpense, calculateAllMemberBalances } from '../utils/balanceUtils';
 import { simplifyDebts } from '../utils/debtUtils';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { PieChart } from 'react-native-chart-kit';
-import { getCategoryFromDescription, CATEGORY_COLORS } from '../../utils/categoryUtils'; // Adjust path as necessary
-
-const COLORS = { /* ... (palette as before) ... */
-  background: '#f8f9fa', cardBackground: '#ffffff', text: '#212529', textSecondary: '#6c757d',
-  primary: '#007bff', accentPositive: '#28a745', accentNegative: '#dc3545',
-  border: '#dee2e6', subtleBorder: '#e9ecef', expenseItemBg: '#ffffff', settlementItemBg: '#e6f7ff',
-};
+import { getCategoryFromDescription, CATEGORY_COLORS } from '../../utils/categoryUtils';
 
 function GroupDetailScreen({ route, navigation }) {
+  const theme = useTheme(); // THEME HOOK
   const { groupId, groupName } = route.params;
 
   const [groupExpenses, setGroupExpenses] = useState([]);
   const [groupSettlements, setGroupSettlements] = useState([]);
-  const [groupDetails, setGroupDetails] = useState(null); // Contains { ..., members: [{uid, email, name (added by fetchData)}]}
-  const [usernamesMap, setUsernamesMap] = useState({}); // Still useful for quick lookups outside groupDetails context
+  const [groupDetails, setGroupDetails] = useState(null);
+  const [usernamesMap, setUsernamesMap] = useState({});
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const [balances, setBalances] = useState({ netBalance: 0, settled: true });
+  const [currentUserNetBalance, setCurrentUserNetBalance] = useState({ netBalance: 0, settled: true });
   const [groupMemberBalances, setGroupMemberBalances] = useState({});
   const [currentUserUid, setCurrentUserUid] = useState(null);
 
-  // Chart State
   const [pieChartData, setPieChartData] = useState([]);
   const [isLoadingChart, setIsLoadingChart] = useState(true);
 
-  // Simplify Debts Modal State
   const [isSimplifyModalVisible, setIsSimplifyModalVisible] = useState(false);
   const [simplifiedTransactionsList, setSimplifiedTransactionsList] = useState([]);
   const [isCalculatingSimplifiedDebts, setIsCalculatingSimplifiedDebts] = useState(false);
-
 
   useEffect(() => {
     const user = firebase.auth().currentUser;
@@ -52,7 +44,7 @@ function GroupDetailScreen({ route, navigation }) {
   const fetchData = useCallback(async () => {
     if (!currentUserUid || !groupId) return;
     setRefreshing(true);
-    setLoading(true); // Ensure loading is true at start of fetch
+    setLoading(true);
 
     const uidsToFetch = new Set();
     try {
@@ -61,14 +53,12 @@ function GroupDetailScreen({ route, navigation }) {
         Alert.alert("Error", "Group not found."); navigation.goBack(); return;
       }
       const currentGroupData = groupDoc.data();
-      // Fetch usernames for members first
       const memberUids = currentGroupData.members?.map(m => m.uid) || [];
       memberUids.forEach(uid => uidsToFetch.add(uid));
 
       const namesMapForGroupMembers = memberUids.length > 0 ? await fetchUsernames(memberUids) : {};
       const populatedMembers = currentGroupData.members.map(m => ({...m, name: namesMapForGroupMembers[m.uid] || m.email}));
       setGroupDetails({...currentGroupData, members: populatedMembers});
-
 
       const expensesSnapshot = await firebase.firestore().collection('expenses').where('groupId', '==', groupId).orderBy('createdAt', 'desc').get();
       const expensesArray = expensesSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
@@ -86,7 +76,7 @@ function GroupDetailScreen({ route, navigation }) {
 
       if (uidsToFetch.size > 0) {
         const namesMap = await fetchUsernames(Array.from(uidsToFetch));
-        setUsernamesMap(prev => ({...prev, ...namesMap})); // Merge with any existing from group members
+        setUsernamesMap(prev => ({...prev, ...namesMap}));
       }
     } catch (error) {
       console.error("Error fetching group data: ", error);
@@ -103,26 +93,20 @@ function GroupDetailScreen({ route, navigation }) {
     }
   }, [currentUserUid, groupId, fetchData]);
 
-  // Recalculate balances whenever relevant data changes
   useEffect(() => {
     if (!currentUserUid || loading || refreshing || !groupDetails?.members) return;
-
     const acceptedMemberUids = groupDetails.members.filter(m => m.status === 'accepted').map(m => m.uid);
     if (acceptedMemberUids.length === 0) {
         setCurrentUserNetBalance({ netBalance: 0, settled: true });
         setGroupMemberBalances({});
         return;
     }
-
     const allBalances = calculateAllMemberBalances(groupExpenses, groupSettlements, acceptedMemberUids);
     setGroupMemberBalances(allBalances);
-
     const currentUserBalance = allBalances[currentUserUid] || 0;
     setCurrentUserNetBalance({ netBalance: currentUserBalance, settled: Math.abs(currentUserBalance) < 0.01 });
+  }, [groupExpenses, groupSettlements, groupDetails, currentUserUid, loading, refreshing]);
 
-  }, [groupExpenses, groupSettlements, groupDetails, currentUserUid, loading, refreshing]); // Added groupDetails
-
-  // Prepare Pie Chart Data
   useEffect(() => {
     if (groupExpenses && groupExpenses.length > 0) {
       setIsLoadingChart(true);
@@ -131,297 +115,261 @@ function GroupDetailScreen({ route, navigation }) {
         const category = getCategoryFromDescription(expense.description);
         categorySpending[category] = (categorySpending[category] || 0) + parseFloat(expense.amount || 0);
       });
-
       const chartData = Object.keys(categorySpending)
         .filter(category => categorySpending[category] > 0)
         .map(category => ({
-          name: category,
-          population: parseFloat(categorySpending[category].toFixed(2)),
+          name: category, population: parseFloat(categorySpending[category].toFixed(2)),
           color: CATEGORY_COLORS[category] || CATEGORY_COLORS['Other'],
-          legendFontColor: '#555',
-          legendFontSize: 14,
+          legendFontColor: theme.colors.onSurfaceVariant, legendFontSize: 13,
         }));
       setPieChartData(chartData);
       setIsLoadingChart(false);
     } else {
-      setPieChartData([]);
-      setIsLoadingChart(false);
+      setPieChartData([]); setIsLoadingChart(false);
     }
-  }, [groupExpenses]);
+  }, [groupExpenses, theme.colors.onSurfaceVariant]);
 
-
-  const handleSimplifyDebts = () => {
+  const handleSimplifyDebts = () => { /* ... (no change) ... */
     if (!groupDetails || !groupDetails.members || Object.keys(groupMemberBalances).length === 0) {
-      Alert.alert("No Balances", "No member balances calculated yet to simplify.");
-      return;
+      Alert.alert("No Balances", "No member balances calculated yet to simplify."); return;
     }
     setIsCalculatingSimplifiedDebts(true);
-    // Filter balances for accepted members only, as simplifyDebts doesn't know member status
     const balancesToSimplify = {};
     groupDetails.members.forEach(member => {
         if(member.status === 'accepted' && groupMemberBalances[member.uid] !== undefined) {
             balancesToSimplify[member.uid] = groupMemberBalances[member.uid];
         }
     });
-
     const transactions = simplifyDebts(balancesToSimplify);
     setSimplifiedTransactionsList(transactions);
     setIsCalculatingSimplifiedDebts(false);
     setIsSimplifyModalVisible(true);
   };
 
-
-  const renderExpenseItem = ({ item }) => { /* ... (no change from previous) ... */
+  const renderExpenseItem = ({ item }) => {
     if (!currentUserUid) return null;
     let splitDetail = '';
     const myShareInExpense = calculateUserShareInExpense(item, currentUserUid);
     const payerName = usernamesMap[item.paidByUid] || `User ${item.paidByUid?.substring(0,6)}...`;
 
-    if (item.splitType === 'equal') {
-      splitDetail = `Split equally (${(item.amountPerMember || 0).toFixed(2)} each)`;
-    } else if (item.splitType === 'exact') {
-      splitDetail = `Your share: $${myShareInExpense.toFixed(2)}`;
-    } else if (item.splitType === 'itemized') {
-      splitDetail = `Itemized - Your total share: $${myShareInExpense.toFixed(2)}`;
-    }
+    if (item.splitType === 'equal') splitDetail = `Split equally (${(item.amountPerMember || 0).toFixed(2)} each)`;
+    else if (item.splitType === 'exact') splitDetail = `Your share: $${myShareInExpense.toFixed(2)}`;
+    else if (item.splitType === 'itemized') splitDetail = `Itemized - Your total share: $${myShareInExpense.toFixed(2)}`;
 
     return (
       <TouchableOpacity onPress={() => item.splitType === 'itemized' && navigation.navigate('ItemizedExpenseDetail', { expense: item, usernamesMap: usernamesMap })}>
-        <View style={styles.expenseItem}>
-          <View style={styles.expenseHeader}>
-            {item.recurringExpenseId && (
-              <MaterialCommunityIcons name="update" size={16} color={COLORS.textSecondary} style={styles.recurringIcon} />
-            )}
-            <Text style={[styles.expenseDescription, item.recurringExpenseId && styles.descriptionWithIcon]}>{item.description}</Text>
-            <Text style={styles.expenseAmount}>${item.amount ? item.amount.toFixed(2) : '0.00'}</Text>
-          </View>
-          <Text style={styles.expensePaidBy}>Paid by: {item.paidByUid === currentUserUid ? "You" : payerName}</Text>
-          <Text style={styles.expenseSplit}>{splitDetail}</Text>
-          {item.splitType === 'itemized' && <Text style={styles.viewItemsText}>(Tap to view items)</Text>}
-          <Text style={styles.itemDate}>{item.createdAt?.toDate().toLocaleDateString()}</Text>
-        </View>
+        <PaperCard style={styles.activityItemCard} elevation={1}>
+          <PaperCard.Content>
+            <View style={styles.expenseHeader}>
+              {item.recurringExpenseId && ( <MaterialCommunityIcons name="update" size={16} color={theme.colors.onSurfaceVariant} style={styles.recurringIcon} /> )}
+              <PaperText variant="titleMedium" style={[styles.expenseDescription, item.recurringExpenseId && styles.descriptionWithIcon]} numberOfLines={1}>{item.description}</PaperText>
+              <PaperText variant="titleMedium" style={{color: theme.colors.primary}}>${item.amount ? item.amount.toFixed(2) : '0.00'}</PaperText>
+            </View>
+            <PaperText variant="bodySmall" style={{color: theme.colors.onSurfaceVariant}}>Paid by: {item.paidByUid === currentUserUid ? "You" : payerName}</PaperText>
+            <PaperText variant="bodySmall" style={{color: theme.colors.onSurfaceVariant, fontStyle:'italic'}}>{splitDetail}</PaperText>
+            {item.splitType === 'itemized' && <PaperText style={[styles.viewItemsText, {color: theme.colors.primary}]}>(Tap to view items)</PaperText>}
+            <PaperText variant="labelSmall" style={styles.itemDate}>{item.createdAt?.toDate().toLocaleDateString()}</PaperText>
+          </PaperCard.Content>
+        </PaperCard>
       </TouchableOpacity>
     );
   };
-  const renderSettlementItem = ({ item }) => { /* ... (no change from previous) ... */
+  const renderSettlementItem = ({ item }) => {
     const payerName = usernamesMap[item.payerUid] || `User ${item.payerUid?.substring(0,6)}...`;
     const receiverName = usernamesMap[item.receiverUid] || `User ${item.receiverUid?.substring(0,6)}...`;
     return (
-    <View style={styles.settlementItem}>
-      <Text style={styles.settlementText}>
-        <Text style={styles.userName}>{item.payerUid === currentUserUid ? "You" : payerName}</Text>
-        {' paid '}
-        <Text style={styles.userName}>{item.receiverUid === currentUserUid ? "You" : receiverName}</Text>
-        <Text style={styles.settlementAmount}> ${item.amount.toFixed(2)}</Text>
-      </Text>
-      {item.note ? <Text style={styles.settlementNote}>Note: {item.note}</Text> : null}
-      <Text style={styles.itemDate}>{item.createdAt?.toDate().toLocaleDateString()}</Text>
-    </View>
+    <PaperCard style={[styles.activityItemCard, {backgroundColor: theme.colors.elevation.level1}]} elevation={1}>
+      <PaperCard.Content>
+        <PaperText variant="bodyLarge">
+          <PaperText style={{fontWeight: 'bold', color: theme.colors.primary}}>{item.payerUid === currentUserUid ? "You" : payerName}</PaperText>
+          {' paid '}
+          <PaperText style={{fontWeight: 'bold', color: theme.colors.primary}}>{item.receiverUid === currentUserUid ? "You" : receiverName}</PaperText>
+          <PaperText style={{fontWeight: 'bold', color: theme.colors.customSuccess || MD3Colors.green600}}> ${item.amount.toFixed(2)}</PaperText>
+        </PaperText>
+        {item.note ? <PaperText variant="bodySmall" style={{color: theme.colors.onSurfaceVariant, fontStyle:'italic', marginTop:4}}>Note: {item.note}</PaperText> : null}
+        <PaperText variant="labelSmall" style={styles.itemDate}>{item.createdAt?.toDate().toLocaleDateString()}</PaperText>
+      </PaperCard.Content>
+    </PaperCard>
   )};
-  const renderBalanceSummary = () => { /* ... (no change from previous, uses currentUserNetBalance now) ... */
+  const renderBalanceSummary = () => {
     let balanceText = "Calculating balance...";
-    let balanceStyle = styles.balanceCalculatingText;
+    let balanceStyle = {color: theme.colors.onSurfaceVariant};
 
-    if (!loading && !refreshing) { // Use currentUserNetBalance
+    if (!loading && !refreshing) {
         if (currentUserNetBalance.settled) {
             balanceText = "You are settled up in this group!";
-            balanceStyle = styles.settledText;
+            balanceStyle = {color: theme.colors.customSuccess || MD3Colors.green600, fontWeight:'bold'};
         } else if (currentUserNetBalance.netBalance > 0) {
             balanceText = `Overall, you are owed: $${currentUserNetBalance.netBalance.toFixed(2)}`;
-            balanceStyle = styles.owedToMeText;
+            balanceStyle = {color: theme.colors.customSuccess || MD3Colors.green600, fontWeight:'bold'};
         } else {
             balanceText = `Overall, you owe: $${Math.abs(currentUserNetBalance.netBalance).toFixed(2)}`;
-            balanceStyle = styles.youOweText;
+            balanceStyle = {color: theme.colors.error, fontWeight:'bold'};
         }
     }
-    return <Text style={[styles.balanceSummaryText, balanceStyle]}>{balanceText}</Text>;
+    return <PaperText variant="titleLarge" style={[styles.balanceSummaryText, balanceStyle]}>{balanceText}</PaperText>;
   };
 
-  if (loading && !refreshing && !groupDetails) { // Adjusted initial loading condition
-    return <View style={styles.centered}><ActivityIndicator size="large" color={COLORS.primary} /><Text>Loading group details...</Text></View>;
+  if (loading && !refreshing && !groupDetails) {
+    return <View style={[styles.centered, {backgroundColor: theme.colors.background}]}><PaperActivityIndicator size="large" color={theme.colors.primary} /><PaperText>Loading details...</PaperText></View>;
   }
 
-  const combinedActivity = [...groupExpenses, ...groupSettlements]
-    .sort((a, b) => (b.createdAt?.toDate?.() || 0) - (a.createdAt?.toDate?.() || 0));
+  const combinedActivity = [...groupExpenses, ...groupSettlements].sort((a, b) => (b.createdAt?.toDate?.() || 0) - (a.createdAt?.toDate?.() || 0));
   const renderActivityItem = ({ item }) => {
     if (item.type === 'settlement') { return renderSettlementItem({ item }); }
     return renderExpenseItem({ item });
   };
-
   const screenWidth = Dimensions.get('window').width;
-
   const renderChartSection = () => {
     if (isLoadingChart) {
-      return (
-        <View style={[styles.chartCardContent, styles.loadingContainer]}>
-          <ActivityIndicator size="large" color={COLORS.primary} />
-          <Text style={styles.loadingText}>Loading Chart...</Text>
-        </View>
-      );
+      return ( <View style={[styles.chartCardContent, styles.loadingContainer]}><PaperActivityIndicator animating={true} size="large" color={theme.colors.primary} /><PaperText style={styles.loadingText}>Loading Chart...</PaperText></View> );
     }
     if (pieChartData.length === 0) {
-      return (
-        <View style={[styles.chartCardContent, styles.loadingContainer]}>
-           <MaterialCommunityIcons name="chart-arc-variant" size={48} color={COLORS.textSecondary} />
-          <Text style={styles.noDataText}>No spending data to display chart.</Text>
-        </View>
-      );
+      return ( <View style={[styles.chartCardContent, styles.loadingContainer]}><MaterialCommunityIcons name="chart-arc-variant" size={48} color={theme.colors.onSurfaceVariant} /><PaperText style={styles.noDataText}>No spending data for chart.</PaperText></View> );
     }
     return (
       <View style={styles.chartCardContent}>
-        <PieChart
-          data={pieChartData}
-          width={screenWidth - (styles.chartCard.marginHorizontal * 2) - (styles.chartCardContent.padding * 2) -10} // Adjusted width calculation
-          height={230}
-          chartConfig={{
-            backgroundColor: COLORS.cardBackground, // Chart background, not card itself
-            backgroundGradientFrom: COLORS.cardBackground,
-            backgroundGradientTo: COLORS.cardBackground,
-            decimalPlaces: 2,
-            color: (opacity = 1) => `rgba(50, 50, 50, ${opacity})`, // Darker text for chart labels if needed
-            labelColor: (opacity = 1) => `rgba(50, 50, 50, ${opacity})`, // Darker text for legend
-            style: { borderRadius: 10 }, // Style for chart area itself if any
-            propsForLabels: { // Style for the percentage labels on slices
-                fontSize: 11,
-                // fill: '#fff' // Example if slices are dark
-            },
-          }}
-          accessor={"population"}
-          backgroundColor={"transparent"} // Pie chart background itself transparent
-          paddingLeft={"10"} // Fine-tune for centering based on your data/labels
-          absolute // Show absolute values if desired
-          // hasLegend={true} // default is true
-        />
+        <PieChart data={pieChartData} width={screenWidth - (styles.chartCard.marginHorizontal * 2) - (styles.chartCardContent.padding * 2) -10} height={230}
+          chartConfig={{ backgroundColor: theme.colors.surface, backgroundGradientFrom: theme.colors.surface, backgroundGradientTo: theme.colors.surface, decimalPlaces: 2, color: (opacity = 1) => theme.colors.onSurface, labelColor: (opacity = 1) => theme.colors.onSurfaceVariant, style: { borderRadius: 10 }, propsForLabels: { fontSize: 11, fill: theme.colors.onSurfaceVariant } }}
+          accessor={"population"} backgroundColor={"transparent"} paddingLeft={"10"} absolute />
       </View>
     );
   };
 
-
   return (
-    <View style={styles.container}>
+    <View style={[styles.container, {backgroundColor: theme.colors.background}]}>
       <FlatList
         ListHeaderComponent={
           <>
-            <View style={styles.balanceContainer}>{renderBalanceSummary()}</View>
+            <PaperCard style={styles.balanceContainer} elevation={2}>{renderBalanceSummary()}</PaperCard>
             <View style={styles.actionButtonsContainer}>
-              <StyledButton title="Invite Member" onPress={() => navigation.navigate('InviteMembers', { groupId: groupId })} type="secondary" style={styles.actionButton}/>
-              <StyledButton title="Record Payment" onPress={() => navigation.navigate('RecordPayment', { groupId: groupId })} type="secondary" style={styles.actionButton}/>
+              <PaperButton mode="outlined" onPress={() => navigation.navigate('InviteMembers', { groupId: groupId })} style={styles.actionButton} icon="account-plus-outline">Invite</PaperButton>
+              <PaperButton mode="outlined" onPress={() => navigation.navigate('RecordPayment', { groupId: groupId })} style={styles.actionButton} icon="arrow-left-right">Record Pymt</PaperButton>
             </View>
-            <StyledButton title="Simplify Group Debts" onPress={handleSimplifyDebts} type="outline" style={styles.simplifyButton} disabled={isCalculatingSimplifiedDebts || loading || Object.keys(groupMemberBalances).length === 0}/>
+            <PaperButton mode="elevated" onPress={handleSimplifyDebts} style={styles.simplifyButton} icon="calculator-variant-outline" disabled={isCalculatingSimplifiedDebts || loading || Object.keys(groupMemberBalances).length === 0 || groupDetails?.members?.filter(m => m.status === 'accepted').length < 2}>Simplify Debts</PaperButton>
 
-            <View style={styles.membersContainer}>
-              <Text style={styles.sectionTitle}>Accepted Members & Balances</Text>
+            <PaperCard style={styles.membersContainer} elevation={1}>
+              <PaperCard.Title title="Accepted Members & Balances" titleVariant="titleMedium"
+                titleStyle={{color: theme.colors.onSurface}}
+                subtitleStyle={{color:theme.colors.onSurfaceVariant}}
+              />
+              <PaperCard.Content>
               {groupDetails?.members?.filter(m => m.status === 'accepted').map(member => {
                 const balance = groupMemberBalances[member.uid] || 0;
-                let balanceColor = balance === 0 ? COLORS.textSecondary : balance > 0 ? COLORS.accentPositive : COLORS.accentNegative;
+                let balanceColor = balance === 0 ? theme.colors.onSurfaceVariant : balance > 0 ? (theme.colors.customSuccess || MD3Colors.green600) : theme.colors.error;
                 return (
                   <View key={member.uid} style={styles.memberBalanceItem}>
-                    <Text style={styles.memberEmail}>{usernamesMap[member.uid] || member.email} {member.uid === currentUserUid ? "(You)" : ""}</Text>
-                    <Text style={{...styles.memberBalanceText, color: balanceColor}}>
-                        {balance === 0 ? "Settled" : balance > 0 ? `Owed $${balance.toFixed(2)}` : `Owes $${Math.abs(balance).toFixed(2)}`}
-                    </Text>
+                    <PaperText variant="bodyMedium">{usernamesMap[member.uid] || member.email} {member.uid === currentUserUid ? "(You)" : ""}</PaperText>
+                    <PaperText variant="bodyMedium" style={{color: balanceColor, fontWeight:'500'}}>
+                        {balance === 0 ? "Settled" : balance > 0 ? `Owed $${balance.toFixed(2)}` : `Owes $${Math.abs(balance.toFixed(2))}`}
+                    </PaperText>
                   </View>
                 );
               })}
               {(!groupDetails?.members || groupDetails.members.filter(m => m.status === 'accepted').length === 0) &&
-                <Text style={styles.noItemsText}>No other accepted members.</Text>}
-            </View>
+                <PaperText style={styles.noItemsText}>No other accepted members.</PaperText>}
+              </PaperCard.Content>
+            </PaperCard>
 
-            {/* Pie Chart Section - Using custom card style */}
-            <View style={styles.chartCard}>
-                <View style={styles.titleRow}>
-                    <MaterialCommunityIcons name="chart-pie" size={24} color={COLORS.primary} style={styles.titleIcon} />
-                    <Text style={styles.chartTitle}>Spending by Category</Text>
-                </View>
-                {renderChartSection()}
-            </View>
+            <PaperCard style={styles.chartCard} elevation={1}>
+                <PaperCard.Title
+                    title="Spending by Category"
+                    titleVariant="titleMedium"
+                    left={(props) => <MaterialCommunityIcons {...props} name="chart-pie" color={theme.colors.primary} />}
+                    titleStyle={{color: theme.colors.onSurface}}
+                />
+                <PaperCard.Content>
+                    {renderChartSection()}
+                </PaperCard.Content>
+            </PaperCard>
 
-            <Text style={styles.sectionTitle}>Group Activity</Text>
+            <PaperText variant="titleLarge" style={[styles.sectionTitle, {color: theme.colors.onBackground}]}>Group Activity</PaperText>
           </>
         }
         data={combinedActivity}
         renderItem={renderActivityItem}
         keyExtractor={item => item.id + (item.type || 'expense')}
         style={styles.activityList}
-        ListEmptyComponent={<Text style={styles.noItemsText}>{loading || refreshing ? 'Loading activity...' : 'No activity in this group yet.'}</Text>}
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={fetchData} colors={[COLORS.primary]}/>}
+        contentContainerStyle={{paddingBottom: 20}}
+        ListEmptyComponent={<PaperText style={styles.noItemsText}>{loading || refreshing ? 'Loading activity...' : 'No activity in this group yet.'}</PaperText>}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={fetchData} colors={[theme.colors.primary]} tintColor={theme.colors.primary}/>}
       />
-
-      <Modal visible={isSimplifyModalVisible} onRequestClose={() => setIsSimplifyModalVisible(false)} animationType="slide" transparent={true}>
-        <View style={styles.modalContainer}>
-          <View style={styles.modalContent}>
-            <Text style={styles.modalTitle}>Simplified Group Debts</Text>
-            {isCalculatingSimplifiedDebts ? <ActivityIndicator/> :
+      <Portal>
+        <Dialog visible={isSimplifyModalVisible} onDismiss={() => setIsSimplifyModalVisible(false)} style={{backgroundColor: theme.colors.surface}}>
+          <Dialog.Title style={{color: theme.colors.onSurface}}>Simplified Group Debts</Dialog.Title>
+          <Dialog.ScrollArea style={{maxHeight: 400, paddingHorizontal:0}}>
+            <ScrollView>
+            {isCalculatingSimplifiedDebts ? <PaperActivityIndicator animating={true} color={theme.colors.primary}/> :
               simplifiedTransactionsList.length === 0 ?
-              <Text style={styles.noItemsText}>Everyone is settled up, or no simplification needed!</Text> :
+              <PaperText style={styles.noItemsText}>Everyone is settled up!</PaperText> : // Changed message slightly
               <FlatList
                 data={simplifiedTransactionsList}
                 keyExtractor={(item, index) => `txn-${index}`}
                 renderItem={({item}) => (
                   <View style={styles.transactionItem}>
-                    <Text style={styles.transactionText}>
-                      <Text style={styles.userName}>{usernamesMap[item.fromUid] || item.fromUid.substring(0,6)}</Text>
-                      {' should pay '}
-                      <Text style={styles.userName}>{usernamesMap[item.toUid] || item.toUid.substring(0,6)}</Text>
-                      <Text style={styles.transactionAmount}> ${item.amount.toFixed(2)}</Text>
-                    </Text>
+                    <PaperText variant="bodyMedium" style={{color: theme.colors.onSurface}}>
+                      <PaperText style={{fontWeight: 'bold'}}>{usernamesMap[item.fromUid] || item.fromUid.substring(0,6)}</PaperText>
+                      {' pays '}
+                      <PaperText style={{fontWeight: 'bold'}}>{usernamesMap[item.toUid] || item.toUid.substring(0,6)}</PaperText>
+                      <PaperText style={{fontWeight: 'bold', color: theme.colors.primary}}> ${item.amount.toFixed(2)}</PaperText>
+                    </PaperText>
                   </View>
                 )}
               />
             }
-            <Text style={styles.disclaimerText}>These are suggested payments. Please record actual payments made using the 'Record Payment' feature.</Text>
-            <StyledButton title="Close" onPress={() => setIsSimplifyModalVisible(false)} type="primary" style={{marginTop:15}}/>
-          </View>
-        </View>
-      </Modal>
+            </ScrollView>
+            <PaperText style={[styles.disclaimerText, {color: theme.colors.onSurfaceVariant}]}>These are suggested payments. Record actual payments using 'Record Payment'.</PaperText>
+          </Dialog.ScrollArea>
+          <Dialog.Actions>
+            <PaperButton onPress={() => setIsSimplifyModalVisible(false)} textColor={theme.colors.primary}>Close</PaperButton>
+          </Dialog.Actions>
+        </Dialog>
+      </Portal>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  // ... (Existing styles)
-  container: { flex: 1, backgroundColor: COLORS.background },
-  centered: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: COLORS.background },
-  balanceContainer: { padding: 20, backgroundColor: COLORS.cardBackground, margin:15, borderRadius: 10, shadowColor: "#000", shadowOffset: { width: 0, height: 2, }, shadowOpacity: 0.05, shadowRadius: 3.84, elevation: 3, alignItems: 'center' },
+  container: { flex: 1, /* bg from theme */ },
+  centered: { flex: 1, justifyContent: 'center', alignItems: 'center', /* bg from theme */ },
+  balanceContainer: { padding: 20, marginHorizontal:15, marginTop:15, marginBottom:5, borderRadius: 10, alignItems: 'center' /* bg, shadow from PaperCard */ },
   balanceSummaryText: { fontSize: 20, fontWeight: 'bold', textAlign: 'center' },
-  balanceCalculatingText: { color: COLORS.textSecondary },
-  settledText: { color: COLORS.accentPositive },
-  owedToMeText: { color: COLORS.accentPositive },
-  youOweText: { color: COLORS.accentNegative },
-  actionButtonsContainer: { flexDirection: 'row', justifyContent: 'space-around', marginBottom: 10, paddingHorizontal:10 },
-  actionButton: { flex: 0.48 },
-  simplifyButton: { marginHorizontal:15, marginBottom:20, backgroundColor: COLORS.cardBackground, borderWidth:1, borderColor:COLORS.primary},
-  membersContainer: { padding: 15, backgroundColor: COLORS.cardBackground, marginHorizontal:15, marginBottom:20, borderRadius: 10, shadowColor: "#000", shadowOffset: { width: 0, height: 1, }, shadowOpacity: 0.05, shadowRadius: 2, elevation: 2 },
-  sectionTitle: { fontSize: 18, fontWeight: '600', color: COLORS.text, marginBottom: 12, paddingHorizontal: 20 },
-  memberEmail: { fontSize: 15, color: COLORS.textSecondary, paddingVertical: 5 }, // For member list without balance
-  memberBalanceItem: { flexDirection: 'row', justifyContent: 'space-between', alignItems:'center', paddingVertical: 8, borderBottomWidth:1, borderBottomColor: COLORS.subtleBorder},
-  memberBalanceText: { fontSize: 14, fontWeight:'500'},
-
+  balanceCalculatingText: { /* color from theme */ },
+  actionButtonsContainer: { flexDirection: 'row', justifyContent: 'space-around', marginVertical: 15, paddingHorizontal:10 },
+  actionButton: { flex: 0.48, },
+  simplifyButton: { marginHorizontal:15, marginBottom:20, },
+  membersContainer: { marginHorizontal:15, marginBottom:20, },
+  sectionTitle: { marginHorizontal: 20, marginBottom: 15, marginTop:10, fontWeight:'bold'},
+  memberBalanceItem: { flexDirection: 'row', justifyContent: 'space-between', alignItems:'center', paddingVertical: 10, borderBottomWidth:1, },
+  memberEmail: { /* Replaced by PaperText variant */ },
+  memberBalanceText: { fontWeight:'500'},
   activityList: { paddingHorizontal: 15 },
-  expenseItem: { backgroundColor: COLORS.expenseItemBg, padding: 15, marginBottom: 12, borderRadius: 8, borderWidth: 1, borderColor: COLORS.border },
+  activityItemCard: { marginBottom: 12, borderWidth:0 },
   expenseHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems:'center', marginBottom: 8 },
-  recurringIcon: { marginRight: 6 },
+  recurringIcon: { marginRight: 8 },
   descriptionWithIcon: { flexShrink:1, maxWidth: '80%' },
-  expenseDescription: { fontSize: 16, fontWeight: '500', color: COLORS.text, flexShrink:1 },
-  expenseAmount: { fontSize: 16, fontWeight: 'bold', color: COLORS.primary },
-  expensePaidBy: { fontSize: 14, color: COLORS.textSecondary, marginBottom: 4 },
-  expenseSplit: { fontSize: 14, color: COLORS.textSecondary, fontStyle:'italic' },
-  itemDate: { fontSize: 12, color: COLORS.textSecondary, textAlign: 'right', marginTop: 8 },
-  viewItemsText: { fontSize: 13, color: COLORS.primary, marginTop: 5, textAlign: 'right', fontWeight:'500' },
-  settlementItem: { backgroundColor: COLORS.settlementItemBg, padding: 15, marginBottom: 12, borderRadius: 8, borderWidth:1, borderColor: COLORS.primary+'40' },
-  settlementText: { fontSize: 16, color: COLORS.text },
-  userName: { fontWeight: 'bold', color: COLORS.primary },
-  settlementAmount: { fontWeight: 'bold', color: COLORS.accentPositive },
-  settlementNote: { fontSize: 14, color: COLORS.textSecondary, marginTop: 5, fontStyle:'italic' },
-  noItemsText: { textAlign: 'center', marginVertical: 20, fontSize: 15, color: COLORS.textSecondary },
-  // Modal Styles for Simplify Debts
+  expenseDescription: { flexShrink:1 },
+  expenseAmount: { fontWeight: 'bold' },
+  expensePaidBy: { fontSize:13, marginTop:4, marginBottom: 2 },
+  expenseSplit: { fontSize:13, fontStyle:'italic' },
+  itemDate: { fontSize: 12, textAlign: 'right', marginTop: 8, opacity:0.7 },
+  viewItemsText: { fontSize: 13, marginTop: 5, textAlign: 'right', fontWeight:'500' },
+  settlementText: { /* Replaced by PaperText variant */ },
+  userName: { fontWeight: 'bold', /* color from theme.colors.primary */ },
+  settlementAmount: { fontWeight: 'bold', /* color from theme.colors.customSuccess */ },
+  settlementNote: { fontSize: 14, marginTop: 5, fontStyle:'italic', /* color from theme.colors.onSurfaceVariant */ },
+  noItemsText: { textAlign: 'center', marginVertical: 20, fontSize: 15, /* color from theme.colors.onSurfaceVariant */ },
   modalContainer: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: 'rgba(0,0,0,0.6)' },
-  modalContent: { backgroundColor: COLORS.cardBackground, padding: 25, borderRadius: 10, width: '90%', maxHeight: '85%', shadowColor: "#000", shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.25, shadowRadius: 3.84, elevation: 5 },
-  modalTitle: { fontSize: 20, fontWeight: 'bold', marginBottom: 20, textAlign: 'center', color: COLORS.text },
-  transactionItem: { paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: COLORS.subtleBorder },
-  transactionText: { fontSize: 16, color: COLORS.text },
-  transactionAmount: { fontWeight: 'bold', color: COLORS.primary },
-  disclaimerText: {fontSize: 13, color: COLORS.textSecondary, textAlign:'center', marginTop:15, fontStyle:'italic'},
+  modalTitle: { marginBottom: 20, textAlign: 'center'},
+  transactionItem: { paddingVertical: 12, borderBottomWidth: 1, /* borderColor from theme.colors.outline */ },
+  disclaimerText: {fontSize: 13, textAlign:'center', marginTop:15, fontStyle:'italic', /* color from theme.colors.onSurfaceVariant */},
+  chartCard: { marginHorizontal: 15, marginTop: 10, marginBottom: 20, elevation:1 }, // elevation from PaperCard
+  chartCardContent: { alignItems: 'center', padding: 10, },
+  titleRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 12, paddingHorizontal: 0, justifyContent:'flex-start' }, // Adjusted for Card.Title
+  titleIcon: { marginRight: 10, }, // Used with Card.Title left prop
+  chartTitle: { fontWeight: '600', /* color from theme, use PaperText variant */ },
+  loadingContainer: { height: 230, justifyContent: 'center', alignItems: 'center', },
+  loadingText: { marginTop: 10, fontSize: 15, /* color from theme.colors.onSurfaceVariant */ },
 });
 
 export default GroupDetailScreen;

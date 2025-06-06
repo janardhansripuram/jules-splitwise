@@ -1,17 +1,10 @@
 import React, { useState } from 'react';
-import { View, Text, StyleSheet, Alert, TouchableOpacity } from 'react-native';
+import { View, StyleSheet, Alert, TouchableOpacity } from 'react-native';
 import { firebase } from '../../firebaseConfig';
-import StyledButton from '../components/StyledButton'; // Import StyledButton
-import StyledTextInput from '../components/StyledTextInput'; // Import StyledTextInput
-
-const COLORS = { // Defined for this screen, or import from a global styles file
-  background: '#f8f9fa',
-  text: '#212529',
-  primary: '#007bff',
-  secondaryText: '#6c757d',
-};
+import { Button as PaperButton, TextInput as PaperTextInput, Text as PaperText, useTheme, ActivityIndicator as PaperActivityIndicator } from 'react-native-paper';
 
 function LoginScreen({ navigation }) {
+  const theme = useTheme(); // Access the theme
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
@@ -24,43 +17,55 @@ function LoginScreen({ navigation }) {
     setLoading(true);
     try {
       await firebase.auth().signInWithEmailAndPassword(email.trim(), password);
-      // Navigation is handled by onAuthStateChanged
+      // Navigation is handled by onAuthStateChanged in App.js
     } catch (error) {
       Alert.alert("Login Failed", error.message);
-      console.error("Login error: ", error);
+      // console.error("Login error: ", error); // Keep for debugging if needed
     }
     setLoading(false);
   };
 
   return (
-    <View style={styles.container}>
-      <Text style={styles.title}>Welcome Back!</Text>
-      <StyledTextInput
-        placeholder="Email Address"
+    <View style={[styles.container, { backgroundColor: theme.colors.background }]}>
+      <PaperText variant="headlineLarge" style={[styles.title, { color: theme.colors.primary }]}>Welcome Back!</PaperText>
+      <PaperTextInput
+        label="Email Address"
         value={email}
         onChangeText={setEmail}
         keyboardType="email-address"
         autoCapitalize="none"
-        textContentType="emailAddress" // Helps with autofill
+        textContentType="emailAddress"
         disabled={loading}
+        style={styles.input}
+        mode="outlined"
       />
-      <StyledTextInput
-        placeholder="Password"
+      <PaperTextInput
+        label="Password"
         value={password}
         onChangeText={setPassword}
         secureTextEntry
-        textContentType="password" // Helps with autofill
+        textContentType="password"
         disabled={loading}
+        style={styles.input}
+        mode="outlined"
       />
-      <StyledButton
-        title={loading ? "Logging in..." : "Login"}
-        onPress={handleLogin}
-        type="primary"
-        disabled={loading}
-        style={{width: '100%', marginTop: 10}} // Make button full width
-      />
+      {loading ? (
+        <PaperActivityIndicator animating={true} color={theme.colors.primary} size="large" style={styles.loader} />
+      ) : (
+        <PaperButton
+          mode="contained"
+          onPress={handleLogin}
+          disabled={loading}
+          style={styles.button}
+          labelStyle={styles.buttonLabel}
+        >
+          Login
+        </PaperButton>
+      )}
       <TouchableOpacity onPress={() => navigation.navigate('SignUp')} disabled={loading} style={styles.switchButton}>
-        <Text style={styles.switchText}>Don't have an account? <Text style={styles.signUpLink}>Sign Up</Text></Text>
+        <PaperText variant="bodyMedium" style={{ color: theme.colors.onSurfaceVariant }}>
+          Don't have an account? <PaperText variant="bodyMedium" style={{ color: theme.colors.primary, fontWeight: 'bold' }}>Sign Up</PaperText>
+        </PaperText>
       </TouchableOpacity>
     </View>
   );
@@ -70,28 +75,31 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     justifyContent: 'center',
-    padding: 25, // Increased padding
-    backgroundColor: COLORS.background,
+    padding: 25,
   },
   title: {
-    fontSize: 32, // Larger title
-    fontWeight: 'bold',
-    color: COLORS.text,
     textAlign: 'center',
-    marginBottom: 35, // More space after title
+    marginBottom: 35,
+  },
+  input: {
+    marginBottom: 15,
+  },
+  button: {
+    marginTop: 10,
+    paddingVertical: 8, // Add some padding to the button
+  },
+  buttonLabel: {
+    fontSize: 16, // Make button text slightly larger if desired
+  },
+  loader: {
+    marginTop: 20,
+    marginBottom: 20,
   },
   switchButton: {
-    marginTop: 25, // More space before switch text
+    marginTop: 30,
     alignItems: 'center',
   },
-  switchText: {
-    fontSize: 16,
-    color: COLORS.secondaryText,
-  },
-  signUpLink: {
-    color: COLORS.primary,
-    fontWeight: 'bold',
-  }
+  // Removed text styles that are now handled by PaperText variants or theme
 });
 
 export default LoginScreen;
