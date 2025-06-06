@@ -4410,10 +4410,22 @@ react-native-is-edge-to-edge@^1.1.6, react-native-is-edge-to-edge@^1.1.7:
   resolved "https://registry.npmjs.org/react-native-is-edge-to-edge/-/react-native-is-edge-to-edge-1.1.7.tgz"
   integrity sha512-EH6i7E8epJGIcu7KpfXYXiV2JFIYITtq+rVS8uEb+92naMRBdxhTuS8Wn2Q7j9sqyO0B+Xbaaf9VdipIAmGW4w==
 
+react-native-localize@^3.4.1:
+  version "3.4.1"
+  resolved "https://registry.yarnpkg.com/react-native-localize/-/react-native-localize-3.4.1.tgz#df07c13231b4e8cc949e68513b124105f861229c"
+  integrity sha512-NJqJGBUpHtD/MpLCCkrNiqNZ+xFwbHCivxaoN1Oeb8tBAiZr/IqgP3E+MgnqmmdTMOJ33llUfiW3EM6pEIb33w==
+
 react-native-pager@^0.0.3:
   version "0.0.3"
-  resolved "https://registry.yarnpkg.com/react-native-pager/-/react-native-pager-0.0.3.tgz#9f8bb5cf6a5f4604dcba27783196712c17bc6c43"
+  resolved "https://registry.npmjs.org/react-native-pager/-/react-native-pager-0.0.3.tgz"
   integrity sha512-CLD5Z/uPEzfYddMZxFuAyamrbTP/XJ2W0I0VQj7q3XjOhzaO1kUpk2mUoZzr352EQm5wHRTgi/MkubR9P/0Isw==
+
+react-native-paper-dates@^0.22.44:
+  version "0.22.44"
+  resolved "https://registry.yarnpkg.com/react-native-paper-dates/-/react-native-paper-dates-0.22.44.tgz#b653e56ca398aa110cdccf719f335abe1fbca90c"
+  integrity sha512-QpwUNdq1BF5Mok87J6hh5QHSZX6ioiENEmgcmkiEY72tMakA2++7XMvduuDIfoqA5WjEGdKk84q41lNW+cga0A==
+  dependencies:
+    color "^4.2.3"
 
 react-native-paper@^5.14.5:
   version "5.14.5"
@@ -4449,7 +4461,7 @@ react-native-svg@15.11.2:
 
 react-native-tab-view@^4.1.1:
   version "4.1.1"
-  resolved "https://registry.yarnpkg.com/react-native-tab-view/-/react-native-tab-view-4.1.1.tgz#546770d01dc6c96af4504e1285fba2b141d35f2b"
+  resolved "https://registry.npmjs.org/react-native-tab-view/-/react-native-tab-view-4.1.1.tgz"
   integrity sha512-+OSjPCGgmzkgpyyX15M5FkV0XO8ZfWmdfDt11l5f2prWRAUBcj+9fTr5Pd0B3M6F43Kf4wMdohaRBjb8qDfC4w==
   dependencies:
     use-latest-callback "^0.2.3"
