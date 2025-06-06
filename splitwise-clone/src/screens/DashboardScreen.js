@@ -1,31 +1,20 @@
-import React, { useState, useEffect } from 'react';
-import { View, FlatList, StyleSheet, Alert, RefreshControl } from 'react-native';
+import React, { useState, useEffect, useCallback } from 'react';
+import { View, FlatList, StyleSheet, Alert, RefreshControl, ActivityIndicator as RNActivityIndicator } from 'react-native'; // Use RN ActivityIndicator as fallback if Paper one has issues in style block
 import { firebase } from '../../firebaseConfig';
-import { Button as PaperButton, Text as PaperText, Card as PaperCard, ActivityIndicator as PaperActivityIndicator, useTheme, MD3Colors } from 'react-native-paper';
+import {
+    Button as PaperButton,
+    Text as PaperText,
+    Card as PaperCard,
+    ActivityIndicator as PaperActivityIndicator,
+    useTheme,
+    MD3Colors
+} from 'react-native-paper';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
-
-const COLORS = {
-  background: '#f8f9fa',
-  cardBackground: '#ffffff',
-  text: '#212529',
-  textSecondary: '#6c757d',
-  primary: '#007bff',
-  accent: '#28a745', // For positive balance
-  danger: '#dc3545', // For negative balance
-  border: '#ced4da',
-};
-
-function DashboardScreen({ navigation }) {
-  const [personalExpenses, setPersonalExpenses] = useState([]);
-  // const [userOverallBalance, setUserOverallBalance] = useState(0); // Replaced by specific states
-// Import balance utilities if they are not already imported (assuming they are used)
 import { calculateNetBalance, calculateUserShareInExpense } from '../utils/balanceUtils';
-import { generateDueExpenses } from '../utils/recurringExpenseManager'; // Corrected import
-
-// Removed COLORS constant, will use theme from useTheme()
+import { generateDueExpenses } from '../utils/recurringExpenseManager';
 
 function DashboardScreen({ navigation }) {
-  const theme = useTheme(); // theme is already used
+  const theme = useTheme(); // Placed at the top of the component
   const [personalExpenses, setPersonalExpenses] = useState([]);
   const [overallOwedToUser, setOverallOwedToUser] = useState(0);
   const [overallUserOwes, setOverallUserOwes] = useState(0);
@@ -46,30 +35,27 @@ function DashboardScreen({ navigation }) {
   const fetchDataAndBalances = useCallback(async () => {
     if (!currentUserUid) return;
     setRefreshing(true);
-    // We can set isLoadingBalances true here if this is the primary data load point
-    // For recurring expenses, it has its own flag, but balances need this.
     setIsLoadingBalances(true);
 
     let tempOwedToUser = 0;
     let tempUserOwes = 0;
 
     try {
-      // 1. Fetch groups user is a member of
       const groupsSnapshot = await firebase.firestore().collection('groups')
-        .where('members', 'array-contains', { uid: currentUserUid, status: 'accepted', email: firebase.auth().currentUser.email }) // Ensure email matches too for safety
+        .where('members', 'array-contains', { uid: currentUserUid, status: 'accepted', email: firebase.auth().currentUser.email })
         .get();
 
       for (const groupDoc of groupsSnapshot.docs) {
         const groupId = groupDoc.id;
         const groupExpensesSnapshot = await firebase.firestore().collection('expenses')
           .where('groupId', '==', groupId).get();
-        const groupExpenses = groupExpensesSnapshot.docs.map(d => ({ ...d.data(), id: d.id }));
+        const groupExpensesData = groupExpensesSnapshot.docs.map(d => ({ ...d.data(), id: d.id }));
 
         const groupSettlementsSnapshot = await firebase.firestore().collection('settlements')
           .where('groupId', '==', groupId).get();
-        const groupSettlements = groupSettlementsSnapshot.docs.map(d => ({ ...d.data(), id: d.id }));
+        const groupSettlementsData = groupSettlementsSnapshot.docs.map(d => ({ ...d.data(), id: d.id }));
 
-        const groupNetBalance = calculateNetBalance(groupExpenses, groupSettlements, currentUserUid);
+        const groupNetBalance = calculateNetBalance(groupExpensesData, groupSettlementsData, currentUserUid);
         if (groupNetBalance > 0) {
           tempOwedToUser += groupNetBalance;
         } else if (groupNetBalance < 0) {
@@ -77,52 +63,35 @@ function DashboardScreen({ navigation }) {
         }
       }
 
-      // 2. Fetch and process personal expenses
       const personalExpensesQuery = firebase.firestore().collection('expenses').where('groupId', '==', null);
-
-      // Expenses paid by user (potentially owed to user by others if split)
       const paidByMeSnapshot = await personalExpensesQuery.where('paidByUid', '==', currentUserUid).get();
       paidByMeSnapshot.forEach(doc => {
         const expense = { ...doc.data(), id: doc.id };
-        // If personal expense is split, this logic needs to be robust
-        // Assuming personal expenses paid by user are fully their cost unless explicitly split with others
-        // For this example, if paidByUid is currentUserUid and it's a personal expense, it doesn't automatically mean others owe them.
-        // This part would need a concept of "splitting with friends" outside groups.
-        // Simplified: personal expenses paid by user don't contribute to "owedToUser" unless structure supports it.
-        // However, if it was itemized/exact and involved others (even if not a group), it could.
-        // For now, this is a simplification:
-        if (expense.splitType && expense.splitType !== 'personal' && expense.memberOwes) { // e.g. exact split with non-group members
+        if (expense.splitType && expense.splitType !== 'personal_solo' && expense.splitType !== 'personal' && (expense.memberOwes || expense.involvedUids?.length > 1)) {
             const myShare = calculateUserShareInExpense(expense, currentUserUid);
-            tempOwedToUser += (expense.amount - myShare);
+            if(expense.amount - myShare > 0) tempOwedToUser += (expense.amount - myShare);
         }
       });
 
-      // Expenses paid by others where user is involved
-      // This requires querying for involvement. Firestore doesn't directly support 'OR' in array-contains or memberOwes field.
-      // This part is complex for personal expenses without a clear "friends" structure.
-      // A simplified approach: fetch all personal expenses and filter client-side.
       const allPersonalExpensesSnapshot = await personalExpensesQuery.get();
       allPersonalExpensesSnapshot.forEach(doc => {
           const expense = { ...doc.data(), id: doc.id };
           if (expense.paidByUid !== currentUserUid) {
               const userShare = calculateUserShareInExpense(expense, currentUserUid);
-              if (userShare > 0) {
-                  tempUserOwes += userShare;
-              }
+              if (userShare > 0) tempUserOwes += userShare;
           }
       });
 
-      // Also fetch personal expenses to display (those user paid for and are purely personal)
-      const personalExpensesForDisplaySnapshot = await personalExpensesQuery
-        .where('paidByUid', '==', currentUserUid)
-        // .where('splitType', '==', 'personal') // Or however you define purely personal ones
+      const personalExpensesForDisplaySnapshot = await firebase.firestore().collection('expenses')
+        .where('groupId', '==', null) // Personal expenses
+        .where('paidByUid', '==', currentUserUid) // Typically, user wants to see expenses they initiated or are primary on
+        // Further filtering might be needed if personal expenses can be "paid by others for me"
         .orderBy('createdAt', 'desc')
         .get();
       setPersonalExpenses(personalExpensesForDisplaySnapshot.docs.map(d => ({ ...d.data(), id: d.id })));
 
-
-      setOverallOwedToUser(tempOwedToUser);
-      setOverallUserOwes(tempUserOwes);
+      setOverallOwedToUser(parseFloat(tempOwedToUser.toFixed(2)));
+      setOverallUserOwes(parseFloat(tempUserOwes.toFixed(2)));
 
     } catch (error) {
       console.error("Error fetching dashboard balances: ", error);
@@ -139,12 +108,6 @@ function DashboardScreen({ navigation }) {
     }
   }, [currentUserUid, fetchDataAndBalances]);
 
-
-  const onRefresh = () => {
-    fetchDataAndBalances();
-  };
-
-  // useEffect for Recurring Expense Generation (logic remains largely the same, ensure generateDueExpenses is imported correctly)
   useEffect(() => {
     const runRecurringExpenseGeneration = async () => {
       if (isProcessingRecurringExpenses || !currentUserUid) return;
@@ -155,7 +118,7 @@ function DashboardScreen({ navigation }) {
         const templates = templatesSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
         if (templates.length > 0) {
           const batch = firebase.firestore().batch();
-          const generatedCount = await generateDueExpenses(currentUserUid, templates, batch); // Ensure this utility is correctly imported
+          const generatedCount = await generateDueExpenses(currentUserUid, templates, batch);
           if (generatedCount > 0) {
             await batch.commit();
             if (fetchDataAndBalances) fetchDataAndBalances();
@@ -165,33 +128,35 @@ function DashboardScreen({ navigation }) {
       finally { setIsProcessingRecurringExpenses(false); }
     };
     if (currentUserUid) runRecurringExpenseGeneration();
-  }, [currentUserUid, fetchDataAndBalances, isProcessingRecurringExpenses]); // Added isProcessingRecurringExpenses and fetchDataAndBalances to deps
+  }, [currentUserUid, fetchDataAndBalances, isProcessingRecurringExpenses]);
 
-
-  const onRefresh = fetchDataAndBalances; // Simplified onRefresh
+  const onRefresh = fetchDataAndBalances;
 
   const renderExpenseItem = ({ item }) => (
-    <PaperCard style={styles.itemCard} elevation={1}>
+    <PaperCard style={[styles.itemCard, {borderColor: theme.colors.outline, borderRadius: theme.roundness }]} elevation={1}>
       <PaperCard.Content style={styles.itemCardContent}>
         <View style={styles.itemDetails}>
           {item.recurringExpenseId && (
             <MaterialCommunityIcons name="update" size={18} color={theme.colors.onSurfaceVariant} style={styles.recurringIcon} />
           )}
-          <PaperText variant="bodyLarge" style={styles.itemDescription} numberOfLines={1}>{item.description}</PaperText>
+          <PaperText variant="bodyLarge" style={[styles.itemDescription, {color: theme.colors.onSurface}]} numberOfLines={1}>{item.description}</PaperText>
         </View>
         <PaperText variant="bodyLarge" style={[styles.itemAmount, {color: theme.colors.primary}]}>${item.amount ? item.amount.toFixed(2) : '0.00'}</PaperText>
       </PaperCard.Content>
     </PaperCard>
   );
 
+  // Define styles inside component or pass theme to a function if preferred for StyleSheet.create
+  // For simplicity, direct theme usage in JSX for dynamic parts, and StyleSheet for static parts.
+  const styles = getStyles(theme);
+
   return (
     <View style={[styles.container, {backgroundColor: theme.colors.background}]}>
-      {/* Header with a slightly more prominent background from theme, or surface for standard look */}
-      <View style={[styles.headerContainer, {backgroundColor: theme.colors.surfaceVariant /* or theme.colors.primary */}]}>
-        <PaperText variant="headlineMedium" style={[styles.headerTitle, {color: theme.colors.onSurfaceVariant /* or theme.colors.onPrimary */}]}>Dashboard</PaperText>
+      <View style={[styles.headerContainer, {backgroundColor: theme.colors.surfaceVariant}]}>
+        <PaperText variant="headlineMedium" style={[styles.headerTitle, {color: theme.colors.onSurfaceVariant}]}>Dashboard</PaperText>
       </View>
 
-      <PaperCard style={styles.balanceOverviewCard} elevation={2}>
+      <PaperCard style={[styles.balanceOverviewCard, {backgroundColor: theme.colors.surface}]} elevation={2}>
         <PaperCard.Title title="Financial Overview" titleVariant="titleLarge" titleStyle={{color: theme.colors.onSurface}}/>
         <PaperCard.Content>
           {isLoadingBalances ? (
@@ -199,22 +164,22 @@ function DashboardScreen({ navigation }) {
           ) : (
             <>
               <View style={styles.balanceRow}>
-                <PaperText variant="titleMedium">Overall, you are owed:</PaperText>
+                <PaperText variant="titleMedium" style={{color: theme.colors.onSurfaceVariant}}>Overall, you are owed:</PaperText>
                 <PaperText variant="titleMedium" style={{color: theme.colors.customSuccess || MD3Colors.green600}}>${overallOwedToUser.toFixed(2)}</PaperText>
               </View>
               <View style={styles.balanceRow}>
-                <PaperText variant="titleMedium">Overall, you owe:</PaperText>
+                <PaperText variant="titleMedium" style={{color: theme.colors.onSurfaceVariant}}>Overall, you owe:</PaperText>
                 <PaperText variant="titleMedium" style={{color: theme.colors.error}}>${overallUserOwes.toFixed(2)}</PaperText>
               </View>
-              <View style={styles.netBalanceSeparator} />
+              <View style={[styles.netBalanceSeparator, {backgroundColor: theme.colors.outlineVariant}]} />
               <View style={styles.balanceRow}>
-                <PaperText variant="titleLarge">Net Balance:</PaperText>
+                <PaperText variant="titleLarge" style={{color:theme.colors.onSurface}}>Net Balance:</PaperText>
                 <PaperText variant="titleLarge" style={{ color: (overallOwedToUser - overallUserOwes) >= 0 ? (theme.colors.customSuccess || MD3Colors.green600) : theme.colors.error }}>
                   {(overallOwedToUser - overallUserOwes) >= 0 ?
                     `You are owed $${(overallOwedToUser - overallUserOwes).toFixed(2)}` :
                     `You owe $${Math.abs(overallOwedToUser - overallUserOwes).toFixed(2)}`
                   }
-                  {(overallOwedToUser - overallUserOwes) === 0 && "You are settled up!"}
+                  {(Math.abs(overallOwedToUser - overallUserOwes) < 0.01) && "You are settled up!"}
                 </PaperText>
               </View>
             </>
@@ -223,16 +188,17 @@ function DashboardScreen({ navigation }) {
       </PaperCard>
 
       <View style={styles.buttonGrid}>
-        <PaperButton mode="contained" onPress={() => navigation.navigate('AddExpense')} style={styles.gridButton} labelStyle={styles.gridButtonLabel}>Add Expense</PaperButton>
-        <PaperButton mode="contained" onPress={() => navigation.navigate('GroupsList')} style={styles.gridButton} labelStyle={styles.gridButtonLabel}>My Groups</PaperButton>
-        <PaperButton mode="contained" onPress={() => navigation.navigate('PendingInvitations')} style={styles.gridButton} labelStyle={styles.gridButtonLabel}>Invites</PaperButton>
-        <PaperButton mode="contained" onPress={() => navigation.navigate('Friends')} style={styles.gridButton} labelStyle={styles.gridButtonLabel}>Friends</PaperButton>
-        <PaperButton mode="contained" onPress={() => navigation.navigate('RecurringExpensesList')} style={styles.gridButton} labelStyle={styles.gridButtonLabel}>Recurring</PaperButton>
+        <PaperButton mode="contained" onPress={() => navigation.navigate('AddExpense')} style={[styles.gridButton, {borderRadius: theme.roundness * 1.5}]} labelStyle={styles.gridButtonLabel}>Add Expense</PaperButton>
+        <PaperButton mode="contained" onPress={() => navigation.navigate('GroupsList')} style={[styles.gridButton, {borderRadius: theme.roundness * 1.5}]} labelStyle={styles.gridButtonLabel}>My Groups</PaperButton>
+        <PaperButton mode="contained" onPress={() => navigation.navigate('PendingInvitations')} style={[styles.gridButton, {borderRadius: theme.roundness * 1.5}]} labelStyle={styles.gridButtonLabel}>Invites</PaperButton>
+        <PaperButton mode="contained" onPress={() => navigation.navigate('Friends')} style={[styles.gridButton, {borderRadius: theme.roundness * 1.5}]} labelStyle={styles.gridButtonLabel}>Friends</PaperButton>
+        <PaperButton mode="contained" onPress={() => navigation.navigate('RecurringExpensesList')} style={[styles.gridButton, {borderRadius: theme.roundness * 1.5}]} labelStyle={styles.gridButtonLabel}>Recurring</PaperButton>
       </View>
 
       <PaperText variant="titleLarge" style={[styles.sectionTitle, {color: theme.colors.onBackground}]}>Recent Personal Expenses</PaperText>
-      {isLoadingBalances && personalExpenses.length === 0 && !refreshing ? null :
-        personalExpenses.length === 0 && !refreshing ? (
+      {(isLoadingBalances && personalExpenses.length === 0 && !refreshing) ? (
+         <PaperActivityIndicator color={theme.colors.primary} style={{marginTop:20}}/>
+      ): personalExpenses.length === 0 && !refreshing ? (
         <PaperText style={[styles.noItemsText, {color: theme.colors.onSurfaceVariant}]}>No personal expenses recorded yet.</PaperText>
       ) : (
         <FlatList
@@ -242,32 +208,33 @@ function DashboardScreen({ navigation }) {
           style={styles.list}
           contentContainerStyle={{paddingBottom:20}}
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} colors={[theme.colors.primary]} tintColor={theme.colors.primary}/>}
-          ListEmptyComponent={isLoadingBalances || refreshing ? <PaperActivityIndicator color={theme.colors.primary} style={{marginTop:20}}/> : null}
+          ListEmptyComponent={ (isLoadingBalances || refreshing) && personalExpenses.length === 0 ? <PaperActivityIndicator color={theme.colors.primary} style={{marginTop:20}}/> : null}
         />
       )}
     </View>
   );
 }
 
-const styles = StyleSheet.create({
-  container: { flex: 1, /* backgroundColor from theme */ },
-  headerContainer: { paddingHorizontal: 20, paddingTop: 40, paddingBottom: 20, marginBottom: 15, }, // Adjusted paddingTop
+// Styles function that accepts theme
+const getStyles = (theme) => StyleSheet.create({
+  container: { flex: 1, },
+  headerContainer: { paddingHorizontal: 20, paddingTop: 40, paddingBottom: 20, marginBottom: 15, },
   headerTitle: { textAlign: 'center', fontWeight:'bold' },
-  balanceOverviewCard: { marginHorizontal: 15, marginBottom: 20, },
+  balanceOverviewCard: { marginHorizontal: 15, marginBottom: 20, backgroundColor: theme.colors.surface },
   balanceRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginVertical: 8, },
-  netBalanceSeparator: { height: 1, /* backgroundColor from theme.colors.outlineVariant */ marginVertical: 12, },
+  netBalanceSeparator: { height: 1, marginVertical: 12, backgroundColor: theme.colors.outlineVariant},
   buttonGrid: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-around', paddingHorizontal: 10, marginBottom: 20, },
-  gridButton: { width: '48%', marginVertical: 6, borderRadius: theme.roundness * 1.5 }, // Example of using theme roundness
+  gridButton: { width: '48%', marginVertical: 6, }, // borderRadius applied inline using theme.roundness
   gridButtonLabel: { fontSize: 13, paddingVertical:2 },
   sectionTitle: { marginHorizontal: 20, marginBottom: 12, marginTop:10, fontWeight:'bold'},
   list: { paddingHorizontal: 15, },
-  itemCard: { marginBottom: 10, borderWidth:0, borderRadius: theme.roundness }, // Using PaperCard elevation and theme roundness
+  itemCard: { marginBottom: 10, borderWidth:0, backgroundColor: theme.colors.surface }, // Using PaperCard elevation and theme roundness
   itemCardContent: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 12, paddingHorizontal:16 },
   itemDetails: { flexDirection: 'row', alignItems: 'center', flexShrink:1, marginRight:8 },
-  recurringIcon: { marginRight: 10, /* color from theme.colors.onSurfaceVariant */ },
-  itemDescription: { flexShrink: 1, /* color from theme.colors.onSurface */ },
-  itemAmount: { fontWeight: 'bold', /* color from theme.colors.primary */ },
-  noItemsText: { textAlign: 'center', marginVertical: 20, fontSize: 16, /* color from theme.colors.onSurfaceVariant */ },
+  recurringIcon: { marginRight: 10, },
+  itemDescription: { flexShrink: 1, },
+  itemAmount: { fontWeight: 'bold', },
+  noItemsText: { textAlign: 'center', marginVertical: 20, fontSize: 16, },
 });
 
 export default DashboardScreen;
